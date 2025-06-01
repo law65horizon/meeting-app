@@ -1,16 +1,18 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import path from "path";
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
   optimizeDeps: {
     exclude: ['lucide-react'],
   },
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
+  server: {
+    // 1. Remove "https://" and only use the domain name
+    allowedHosts: ["5dc4-98-97-76-110.ngrok-free.app"],
+    
+    // 2. Fix HMR by forcing the client to use the standard HTTPS port (443)
+    hmr: {
+      clientPort: 443,
     },
-  },
+  }
 });
