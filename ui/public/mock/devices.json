@@ -1,0 +1,47 @@
+[
+  {
+    "deviceId": "default",
+    "kind": "audioinput",
+    "label": "Default Microphone"
+  },
+  {
+    "deviceId": "mic-1",
+    "kind": "audioinput",
+    "label": "Built-in Microphone"
+  },
+  {
+    "deviceId": "mic-2",
+    "kind": "audioinput",
+    "label": "External USB Microphone"
+  },
+  {
+    "deviceId": "default",
+    "kind": "audiooutput",
+    "label": "Default Speakers"
+  },
+  {
+    "deviceId": "speaker-1",
+    "kind": "audiooutput",
+    "label": "Built-in Speakers"
+  },
+  {
+    "deviceId": "speaker-2",
+    "kind": "audiooutput",
+    "label": "External Headphones"
+  },
+  {
+    "deviceId": "default",
+    "kind": "videoinput",
+    "label": "Default Camera"
+  },
+  {
+    "deviceId": "camera-1",
+    "kind": "videoinput",
+    "label": "Built-in Webcam"
+  },
+  {
+    "deviceId": "camera-2",
+    "kind": "videoinput",
+    "label": "External USB Camera"
+  }
+]

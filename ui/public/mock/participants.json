@@ -1,0 +1,147 @@
+[
+  {
+    "id": "user-1",
+    "name": "Alex Johnson",
+    "avatar": "https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": false,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": true
+  },
+  {
+    "id": "user-2",
+    "name": "Sarah Williams",
+    "avatar": "https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-3",
+    "name": "Michael Brown",
+    "avatar": "https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": false,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-4",
+    "name": "Emma Davis",
+    "avatar": "https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": false,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-5",
+    "name": "Daniel Wilson",
+    "avatar": "https://images.pexels.com/photos/91227/pexels-photo-91227.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": false,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-6",
+    "name": "Olivia Taylor",
+    "avatar": "https://images.pexels.com/photos/733872/pexels-photo-733872.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-7",
+    "name": "James Miller",
+    "avatar": "https://images.pexels.com/photos/1681010/pexels-photo-1681010.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": false,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-8",
+    "name": "Sophia Anderson",
+    "avatar": "https://images.pexels.com/photos/762020/pexels-photo-762020.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-9",
+    "name": "William Martinez",
+    "avatar": "https://images.pexels.com/photos/1212984/pexels-photo-1212984.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": false,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-10",
+    "name": "Isabella Robinson",
+    "avatar": "https://images.pexels.com/photos/1043471/pexels-photo-1043471.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": false,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-11",
+    "name": "Isabella Robinson",
+    "avatar": "https://images.pexels.com/photos/1043471/pexels-photo-1043471.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": false,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  
+  {
+    "id": "user-12",
+    "name": "James Miller",
+    "avatar": "https://images.pexels.com/photos/1681010/pexels-photo-1681010.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": false,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-13",
+    "name": "Sophia Anderson",
+    "avatar": "https://images.pexels.com/photos/762020/pexels-photo-762020.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-14",
+    "name": "William Martinez",
+    "avatar": "https://images.pexels.com/photos/1212984/pexels-photo-1212984.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": false,
+    "isVideoOn": true,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-15",
+    "name": "Isabella Robinson",
+    "avatar": "https://images.pexels.com/photos/1043471/pexels-photo-1043471.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": false,
+    "isScreenSharing": false,
+    "isHost": false
+  },
+  {
+    "id": "user-16",
+    "name": "Isabella Robinson",
+    "avatar": "https://images.pexels.com/photos/1043471/pexels-photo-1043471.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "isMuted": true,
+    "isVideoOn": false,
+    "isScreenSharing": false,
+    "isHost": false
+  }
+]

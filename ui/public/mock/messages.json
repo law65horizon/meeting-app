@@ -1,0 +1,76 @@
+[
+  {
+    "id": "msg-1",
+    "senderId": "user-1",
+    "senderName": "Alex Johnson",
+    "senderAvatar": "https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "message": "Hi everyone, thanks for joining the call today!",
+    "timestamp": "2025-05-10T10:01:00Z",
+    "isPrivate": false
+  },
+  {
+    "id": "msg-2",
+    "senderId": "user-2",
+    "senderName": "Sarah Williams",
+    "senderAvatar": "https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "message": "Good morning everyone!",
+    "timestamp": "2025-05-10T10:02:00Z",
+    "isPrivate": false
+  },
+  {
+    "id": "msg-3",
+    "senderId": "user-3",
+    "senderName": "Michael Brown",
+    "senderAvatar": "https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "message": "I've prepared a presentation for today's discussion.",
+    "timestamp": "2025-05-10T10:03:00Z",
+    "isPrivate": false
+  },
+  {
+    "id": "msg-4",
+    "senderId": "user-4",
+    "senderName": "Emma Davis",
+    "senderAvatar": "https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "message": "Looking forward to seeing the presentation!",
+    "timestamp": "2025-05-10T10:04:00Z",
+    "isPrivate": false
+  },
+  {
+    "id": "msg-5",
+    "senderId": "user-2",
+    "senderName": "Sarah Williams",
+    "senderAvatar": "https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "message": "Could you please share the link to the document?",
+    "timestamp": "2025-05-10T10:05:00Z",
+    "isPrivate": true,
+    "recipientId": "user-3"
+  },
+  {
+    "id": "msg-6",
+    "senderId": "user-3",
+    "senderName": "Michael Brown",
+    "senderAvatar": "https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "message": "Here's the link: https://example.com/document",
+    "timestamp": "2025-05-10T10:06:00Z",
+    "isPrivate": true,
+    "recipientId": "user-2"
+  },
+  {
+    "id": "msg-7",
+    "senderId": "user-5",
+    "senderName": "Daniel Wilson",
+    "senderAvatar": "https://images.pexels.com/photos/91227/pexels-photo-91227.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "message": "I have a question about the timeline for the next release.",
+    "timestamp": "2025-05-10T10:07:00Z",
+    "isPrivate": false
+  },
+  {
+    "id": "msg-8",
+    "senderId": "user-1",
+    "senderName": "Alex Johnson",
+    "senderAvatar": "https://images.pexels.com/photos/220453/pexels-photo-220453.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1",
+    "message": "We'll discuss the timeline in detail after Michael's presentation.",
+    "timestamp": "2025-05-10T10:08:00Z",
+    "isPrivate": false
+  }
+]

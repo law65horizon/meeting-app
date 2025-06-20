@@ -1,0 +1,52 @@
+[
+  {
+    "id": "meeting-1",
+    "title": "Weekly Team Sync",
+    "description": "Review progress and discuss upcoming priorities",
+    "startTime": "2025-05-10T10:00:00Z",
+    "duration": 60,
+    "hostId": "user-1",
+    "participants": ["user-1", "user-2", "user-3", "user-4", "user-5"],
+    "isRecurring": true
+  },
+  {
+    "id": "meeting-2",
+    "title": "Product Planning",
+    "description": "Define roadmap for Q3",
+    "startTime": "2025-05-11T14:30:00Z",
+    "duration": 90,
+    "hostId": "user-2",
+    "participants": ["user-1", "user-2", "user-6", "user-7"],
+    "isRecurring": false
+  },
+  {
+    "id": "meeting-3",
+    "title": "Design Review",
+    "description": "Review latest UI mockups",
+    "startTime": "2025-05-12T09:00:00Z",
+    "duration": 45,
+    "hostId": "user-3",
+    "participants": ["user-3", "user-5", "user-8", "user-9"],
+    "isRecurring": false
+  },
+  {
+    "id": "meeting-4",
+    "title": "Client Presentation",
+    "description": "Present project progress to client",
+    "startTime": "2025-05-13T15:00:00Z",
+    "duration": 60,
+    "hostId": "user-1",
+    "participants": ["user-1", "user-4", "user-6", "user-10"],
+    "isRecurring": false
+  },
+  {
+    "id": "meeting-5",
+    "title": "Engineering Standup",
+    "description": "Daily sync on engineering tasks",
+    "startTime": "2025-05-14T09:30:00Z",
+    "duration": 30,
+    "hostId": "user-5",
+    "participants": ["user-1", "user-3", "user-5", "user-7", "user-9"],
+    "isRecurring": true
+  }
+]
