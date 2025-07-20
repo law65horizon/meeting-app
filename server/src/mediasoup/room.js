@@ -1,7 +1,13 @@
 
+const room_rules = {
+    private: true,
+    host: '',
+}
+
 
 class Room {
-    constructor(router) {
+    constructor(router, rules) {
+        this.rules = rules
         this.router = router;
         this.peers = new Map()
     }
@@ -16,6 +22,7 @@ class Room {
     }
 
     addPeer(socketId, peerData) {
+        if(this.peers.has(socketId)) throw new Error("Peer already connected")
         this.peers.set(socketId, peerData);
     }
 

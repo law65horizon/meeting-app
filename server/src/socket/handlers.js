@@ -1,7 +1,8 @@
 const {getOrCreateRoom, getRoom, deleteRoom} = require("../mediasoup/roomManager");
 const {getNextWorker} = require("../mediasoup/workerManager")
 const os = require("os")
-const config = require("../config")
+const config = require("../config");
+const { closeRoom } = require("../firebase/utils");
 
 /** Get the first non-loopback IPv4 address of this machine. */
 function getLocalIp() {
@@ -22,18 +23,18 @@ module.exports = (socket) => {
   socket.on("joinRoom", async ({ roomId, rtpCapabilities, appUserId, appUserName }, cb) => {
     try {
         const worker = getNextWorker();
-        const room = await getOrCreateRoom(worker, roomId);
+        const room = await getOrCreateRoom(worker, roomId, socket.user);
         socket.data.roomId = roomId;
         socket.data.appUserId = appUserId; // store for use in produce / getProducers
         socket.join(roomId);
     
         const peer = {
-            appUserId,
-            appUserName,
-            rtpCapabilities,
-            transports: new Map(),
-            producers: new Map(),
-            consumers: new Map()
+          appUserId,
+          appUserName,
+          rtpCapabilities,
+          transports: new Map(),
+          producers: new Map(),
+          consumers: new Map()
         }
     
         room.addPeer(socket.id, peer)
@@ -63,6 +64,7 @@ module.exports = (socket) => {
   socket.on("createWebRtcTransport", async ({ roomId, direction }, cb) => {
     try {
         const room = getRoom(roomId);
+        console.log({rules: room.rules})
         if (!room) return cb({ error: "Room not found" });
     
         const localIp = getLocalIp();
@@ -327,7 +329,7 @@ module.exports = (socket) => {
   })
 
   // ── disconnect ────────────────────────────────────────────────────────────
-  socket.on("disconnect", () => {
+  socket.on("disconnect", async () => {
     const roomId = socket.data.roomId;
     const room = getRoom(roomId)
     if (!room) return;
@@ -349,8 +351,10 @@ module.exports = (socket) => {
     });
 
     // Clean up empty rooms
-    if (room.peers.size === 0) {
-        deleteRoom(roomId)
+    if (room.peers.size === 0 || peerInfo.appUserId === room.rules.host) {
+      
+      deleteRoom(roomId)
+      await closeRoom(roomId)
     }
   });
 }
