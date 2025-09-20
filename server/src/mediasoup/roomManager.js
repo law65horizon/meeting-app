@@ -9,6 +9,7 @@ async function getOrCreateRoom(worker, roomId, user) {
   const roomDoc = await getRoomDoc(roomId)
   if (!roomDoc) throw new Error('Room doc not found')
   if (roomDoc.isPrivate && ![roomDoc.hostId, ...roomDoc.recipients].includes(user?.user_id)) throw new Error('Not authorized')
+  console.log({pss: user?.passcode})
   if (roomDoc.passcode != user?.passcode) throw new Error('Not authorized')
   
   if (rooms.has(roomId)) return rooms.get(roomId);
