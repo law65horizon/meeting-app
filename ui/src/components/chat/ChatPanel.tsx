@@ -1,401 +1,241 @@
-/**
- * ChatPanel.tsx
- *
- * Real-time in-meeting chat panel.
- * Messages flow via socket.io — no persistence, ephemeral per session.
- *
- * Features:
- *  - Send/receive text messages
- *  - Sender name + timestamp on every message
- *  - Own messages right-aligned, others left-aligned
- *  - Emoji picker (native browser emoji keyboard via input type tricks +
- *    a lightweight custom grid for quick access)
- *  - Auto-scroll to latest message
- *  - Unread badge clears when panel opens
- */
-
-import React, {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  KeyboardEvent,
-} from "react";
+import { useState, useEffect, useRef } from 'react';
 import {
-  Box,
-  IconButton,
-  InputBase,
-  Typography,
-  Tooltip,
-} from "@mui/material";
-import { X, Send, Smile } from "lucide-react";
-import { useNewMeetingStore } from "../../store/newMeetingStore";
-import useAuthStore from "../../store/authStore";
+  Box, Typography, TextField, IconButton, Avatar,
+  Stack, alpha, InputAdornment, useTheme,
+} from '@mui/material';
+import { Send, Close } from '@mui/icons-material';
+import { formatDistanceToNowStrict } from 'date-fns';
+import { useMeetingStore } from '../../store/meetingStore';
+import { useAuthStore } from '../../store/authStore';
+import type { Socket } from 'socket.io-client';
 
-// ── Quick-access emoji set ────────────────────────────────────────────────────
-const QUICK_EMOJIS = [
-  "😀","😂","😍","🤔","😮","😢","😡","👍","👎","👋",
-  "🎉","🔥","❤️","💯","✅","🙏","😎","🤣","😅","🥳",
-  "👏","💪","🚀","⭐","💡","🤝","😬","🙄","😴","🤦",
-];
+interface Props { socket: Socket | null; }
 
-interface ChatPanelProps {
-  onClose: () => void;
-  isOpen: boolean;
-}
+export default function ChatPanel({ socket }: Props) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+  const primary   = theme.palette.primary.main;
+  const textPrimary   = theme.palette.text.primary;
+  const textSecondary = theme.palette.text.secondary;
+  const divider   = theme.palette.divider;
+  const bgPaper   = theme.palette.background.paper;
 
-const ChatPanel: React.FC<ChatPanelProps> = ({ onClose, isOpen }) => {
-  const messages = useNewMeetingStore((s) => s.chatMessages);
-  const clearUnread = useNewMeetingStore((s) => s.clearUnreadMessages);
-  const sendMessage = useNewMeetingStore((s) => s.sendChatMessage);
-  const tempUser = useAuthStore((s) => s.tempUser);
-
-  const [text, setText] = useState("");
-  const [emojiOpen, setEmojiOpen] = useState(false);
-
+  const { messages, typingUsers, setChatOpen, resetUnread } = useMeetingStore();
+  const { user } = useAuthStore();
+  const [text, setText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clear unread count when panel opens
   useEffect(() => {
-    if (isOpen) {
-      clearUnread();
-      inputRef.current?.focus();
-    }
-  }, [isOpen, clearUnread]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  // Auto-scroll on new messages
   useEffect(() => {
-    if (isOpen) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    resetUnread();
+  }, [resetUnread]);
+
+  function handleTyping(val: string) {
+    setText(val);
+    if (!isTyping && socket) {
+      setIsTyping(true);
+      socket.emit('chat:typing', { isTyping: true });
     }
-  }, [messages, isOpen]);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => {
+      setIsTyping(false);
+      socket?.emit('chat:typing', { isTyping: false });
+    }, 1500);
+  }
 
-  const handleSend = useCallback(() => {
-    const trimmed = text.trim();
-    if (!trimmed || !tempUser) return;
-    sendMessage(trimmed);
-    setText("");
-    setEmojiOpen(false);
-    inputRef.current?.focus();
-  }, [text, sendMessage, tempUser]);
+  function handleSend() {
+    const msg = text.trim();
+    if (!msg || !socket) return;
+    socket.emit('chat:send', { text: msg }, () => {});
+    setText('');
+    setIsTyping(false);
+    socket.emit('chat:typing', { isTyping: false });
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+  }
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
+  const typingNames = Array.from(typingUsers.values()).join(', ');
 
-  const addEmoji = (emoji: string) => {
-    setText((t) => t + emoji);
-    inputRef.current?.focus();
-  };
-
-  const formatTime = (ts: number) => {
-    const d = new Date(ts);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
+  // Own message bubble color adapts to theme
+  const ownBubbleBg    = isDark ? alpha(primary, 0.2)  : alpha(primary, 0.12);
+  const ownBubbleBorder = isDark ? alpha(primary, 0.3) : alpha(primary, 0.22);
+  const otherBubbleBg   = isDark ? 'rgba(255,255,255,0.06)' : alpha(theme.palette.text.primary, 0.05);
+  const otherBubbleBorder = isDark ? 'rgba(255,255,255,0.08)' : alpha(theme.palette.text.primary, 0.08);
 
   return (
-    <Box
-      sx={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        bgcolor: "#0f172a",
-        fontFamily: "'Sora', sans-serif",
-      }}
-    >
-      {/* ── Header ── */}
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          px: 2,
-          py: 1.5,
-          borderBottom: "1px solid rgba(255,255,255,0.07)",
-          flexShrink: 0,
-        }}
-      >
-        <Typography
-          sx={{
-            fontFamily: "'Sora', sans-serif",
-            fontWeight: 700,
-            fontSize: "0.95rem",
-            color: "#e2e8f0",
-            letterSpacing: "-0.01em",
-          }}
-        >
-          Chat
+    <Box sx={{
+      width: '100%', height: '100%',
+      display: 'flex', flexDirection: 'column',
+      background: isDark ? 'rgba(8,10,14,0.95)' : alpha(bgPaper, 0.97),
+      backdropFilter: 'blur(20px)',
+      borderLeft: `1px solid ${divider}`,
+    }}>
+      {/* Header */}
+      <Box sx={{
+        px: 2.5, py: 2,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        borderBottom: `1px solid ${divider}`,
+        flexShrink: 0,
+      }}>
+        <Typography sx={{
+          fontFamily: '"Sora", sans-serif', fontWeight: 600,
+          fontSize: '0.95rem', color: textPrimary,
+        }}>
+          Meeting chat
         </Typography>
-        <IconButton
-          size="small"
-          onClick={onClose}
-          sx={{ color: "#64748b", "&:hover": { color: "#e2e8f0" } }}
-        >
-          <X size={18} />
+        <IconButton size="small" onClick={() => setChatOpen(false)} sx={{ color: textSecondary }}>
+          <Close fontSize="small" />
         </IconButton>
       </Box>
 
-      {/* ── Message list ── */}
-      <Box
-        sx={{
-          flex: 1,
-          overflowY: "auto",
-          px: 2,
-          py: 1.5,
-          display: "flex",
-          flexDirection: "column",
-          gap: 1.5,
-          // Custom scrollbar
-          "&::-webkit-scrollbar": { width: 4 },
-          "&::-webkit-scrollbar-track": { bgcolor: "transparent" },
-          "&::-webkit-scrollbar-thumb": {
-            bgcolor: "rgba(255,255,255,0.1)",
-            borderRadius: 2,
-          },
-        }}
-      >
+      {/* Messages */}
+      <Box sx={{
+        flex: 1, overflowY: 'auto',
+        px: 2, py: 1.5,
+        display: 'flex', flexDirection: 'column', gap: 2,
+        // Custom scrollbar
+        '&::-webkit-scrollbar': { width: 4 },
+        '&::-webkit-scrollbar-track': { background: 'transparent' },
+        '&::-webkit-scrollbar-thumb': {
+          background: isDark ? 'rgba(255,255,255,0.1)' : alpha(theme.palette.text.primary, 0.12),
+          borderRadius: 4,
+        },
+      }}>
         {messages.length === 0 && (
-          <Box
-            sx={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 1,
-              opacity: 0.4,
-              mt: 8,
-            }}
-          >
-            <Typography sx={{ fontSize: "2rem" }}>💬</Typography>
-            <Typography
-              sx={{
-                color: "#94a3b8",
-                fontSize: "0.8rem",
-                fontFamily: "'Sora', sans-serif",
-              }}
-            >
-              No messages yet
+          <Box sx={{
+            flex: 1, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', flexDirection: 'column', gap: 1,
+          }}>
+            <Typography sx={{ fontSize: 32 }}>💬</Typography>
+            <Typography variant="body2" sx={{ color: textSecondary, textAlign: 'center' }}>
+              No messages yet. Say hello!
             </Typography>
           </Box>
         )}
 
         {messages.map((msg) => {
-          const isOwn = msg.senderId === tempUser?.id;
+          const isOwn = msg.senderId === user?.uid;
           return (
             <Box
               key={msg.id}
               sx={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: isOwn ? "flex-end" : "flex-start",
+                display: 'flex',
+                flexDirection: isOwn ? 'row-reverse' : 'row',
+                gap: 1,
+                alignItems: 'flex-end',
               }}
             >
-              {/* Sender + time */}
-              <Box
-                sx={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 0.75,
-                  mb: 0.4,
-                  flexDirection: isOwn ? "row-reverse" : "row",
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: "0.7rem",
-                    fontWeight: 600,
-                    color: isOwn ? "#6ee7b7" : "#94a3b8",
-                    fontFamily: "'Sora', sans-serif",
-                  }}
+              {!isOwn && (
+                <Avatar
+                  src={msg.senderPhoto || undefined}
+                  sx={{ width: 28, height: 28, fontSize: '0.7rem', flexShrink: 0 }}
                 >
-                  {isOwn ? "You" : msg.senderName}
-                </Typography>
-                <Typography
-                  sx={{
-                    fontSize: "0.65rem",
-                    color: "#475569",
-                    fontFamily: "monospace",
-                  }}
-                >
-                  {formatTime(msg.timestamp)}
-                </Typography>
-              </Box>
-
-              {/* Bubble */}
-              <Box
-                sx={{
-                  maxWidth: "78%",
-                  px: 1.5,
-                  py: 1,
-                  borderRadius: isOwn
-                    ? "16px 16px 4px 16px"
-                    : "16px 16px 16px 4px",
-                  bgcolor: isOwn
-                    ? "rgba(110,231,183,0.15)"
-                    : "rgba(255,255,255,0.07)",
-                  border: isOwn
-                    ? "1px solid rgba(110,231,183,0.2)"
-                    : "1px solid rgba(255,255,255,0.06)",
-                  wordBreak: "break-word",
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: "0.85rem",
-                    color: "#e2e8f0",
-                    lineHeight: 1.5,
-                    fontFamily: "'Sora', sans-serif",
-                    whiteSpace: "pre-wrap",
-                  }}
-                >
-                  {msg.content}
+                  {msg.senderName.slice(0, 2).toUpperCase()}
+                </Avatar>
+              )}
+              <Box sx={{ maxWidth: '78%' }}>
+                {!isOwn && (
+                  <Typography sx={{
+                    fontSize: '0.7rem', color: textSecondary,
+                    mb: 0.4, fontWeight: 500, px: 0.5,
+                  }}>
+                    {msg.senderName}
+                  </Typography>
+                )}
+                <Box sx={{
+                  px: 1.5, py: 1,
+                  background: isOwn ? ownBubbleBg : otherBubbleBg,
+                  border: `1px solid ${isOwn ? ownBubbleBorder : otherBubbleBorder}`,
+                  borderRadius: isOwn ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                }}>
+                  <Typography sx={{
+                    fontSize: '0.875rem',
+                    color: textPrimary,
+                    lineHeight: 1.5, wordBreak: 'break-word',
+                  }}>
+                    {msg.text}
+                  </Typography>
+                </Box>
+                <Typography sx={{
+                  fontSize: '0.65rem',
+                  color: isDark ? '#334155' : alpha(theme.palette.text.secondary, 0.7),
+                  mt: 0.4, px: 0.5,
+                  textAlign: isOwn ? 'right' : 'left',
+                }}>
+                  {formatDistanceToNowStrict(msg.timestamp, { addSuffix: true })}
                 </Typography>
               </Box>
             </Box>
           );
         })}
-
         <div ref={bottomRef} />
       </Box>
 
-      {/* ── Emoji picker ── */}
-      {emojiOpen && (
-        <Box
-          sx={{
-            mx: 2,
-            mb: 1,
-            p: 1.5,
-            bgcolor: "rgba(15,23,42,0.98)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 2,
-            display: "grid",
-            gridTemplateColumns: "repeat(10, 1fr)",
-            gap: 0.5,
-            flexShrink: 0,
+      {/* Typing indicator */}
+      <Box sx={{ px: 2.5, height: 22, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+        {typingNames && (
+          <Typography sx={{
+            fontSize: '0.72rem',
+            color: textSecondary,
+            fontStyle: 'italic',
+          }}>
+            {typingNames} {typingUsers.size === 1 ? 'is' : 'are'} typing…
+          </Typography>
+        )}
+      </Box>
+
+      {/* Input */}
+      <Box sx={{ px: 2, pb: 2, flexShrink: 0 }}>
+        <TextField
+          fullWidth
+          size="small"
+          placeholder="Send a message…"
+          value={text}
+          onChange={(e) => handleTyping(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
           }}
-        >
-          {QUICK_EMOJIS.map((emoji) => (
-            <Box
-              key={emoji}
-              onClick={() => addEmoji(emoji)}
-              sx={{
-                fontSize: "1.2rem",
-                cursor: "pointer",
-                textAlign: "center",
-                lineHeight: "32px",
-                borderRadius: 1,
-                transition: "background 0.15s",
-                "&:hover": { bgcolor: "rgba(255,255,255,0.1)" },
-                userSelect: "none",
-              }}
-            >
-              {emoji}
-            </Box>
-          ))}
-        </Box>
-      )}
-
-      {/* ── Input bar ── */}
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          gap: 0.5,
-          px: 1.5,
-          py: 1.25,
-          borderTop: "1px solid rgba(255,255,255,0.07)",
-          flexShrink: 0,
-        }}
-      >
-        <Tooltip title="Emoji" arrow>
-          <IconButton
-            size="small"
-            onClick={() => setEmojiOpen((v) => !v)}
-            sx={{
-              color: emojiOpen ? "#6ee7b7" : "#64748b",
-              "&:hover": { color: "#6ee7b7" },
-              transition: "color 0.2s",
-            }}
-          >
-            <Smile size={18} />
-          </IconButton>
-        </Tooltip>
-
-        <Box
-          sx={{
-            flex: 1,
-            bgcolor: "rgba(255,255,255,0.06)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: "12px",
-            px: 1.5,
-            py: 0.75,
-            display: "flex",
-            alignItems: "center",
-            transition: "border-color 0.2s",
-            "&:focus-within": {
-              borderColor: "rgba(110,231,183,0.4)",
+          multiline
+          maxRows={4}
+          InputProps={{
+            endAdornment: (
+              <InputAdornment position="end">
+                <IconButton
+                  size="small"
+                  onClick={handleSend}
+                  disabled={!text.trim()}
+                  sx={{
+                    color: text.trim()
+                      ? primary
+                      : isDark ? '#334155' : alpha(textSecondary, 0.5),
+                    transition: 'color 0.15s',
+                  }}
+                >
+                  <Send fontSize="small" />
+                </IconButton>
+              </InputAdornment>
+            ),
+            sx: {
+              borderRadius: '12px',
+              fontSize: '0.875rem',
+              background: isDark ? 'rgba(255,255,255,0.04)' : alpha(theme.palette.text.primary, 0.03),
+              '& fieldset': {
+                borderColor: divider,
+              },
+              '&:hover fieldset': {
+                borderColor: `${alpha(primary, 0.4)} !important`,
+              },
+              '&.Mui-focused fieldset': {
+                borderColor: `${primary} !important`,
+              },
             },
           }}
-        >
-          <InputBase
-            inputRef={inputRef}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Send a message…"
-            multiline
-            maxRows={4}
-            fullWidth
-            sx={{
-              color: "#e2e8f0",
-              fontSize: "0.85rem",
-              fontFamily: "'Sora', sans-serif",
-              "& .MuiInputBase-input::placeholder": {
-                color: "#475569",
-                opacity: 1,
-              },
-            }}
-          />
-        </Box>
-
-        <Tooltip title="Send (Enter)" arrow>
-          <span>
-            <IconButton
-              size="small"
-              onClick={handleSend}
-              disabled={!text.trim()}
-              sx={{
-                color: text.trim() ? "#6ee7b7" : "#334155",
-                bgcolor: text.trim()
-                  ? "rgba(110,231,183,0.12)"
-                  : "transparent",
-                border: "1px solid",
-                borderColor: text.trim()
-                  ? "rgba(110,231,183,0.2)"
-                  : "transparent",
-                borderRadius: "50%",
-                width: 34,
-                height: 34,
-                transition: "all 0.2s",
-                "&:hover": {
-                  bgcolor: text.trim()
-                    ? "rgba(110,231,183,0.22)"
-                    : "transparent",
-                },
-              }}
-            >
-              <Send size={15} />
-            </IconButton>
-          </span>
-        </Tooltip>
+        />
       </Box>
     </Box>
   );
-};
-
-export default ChatPanel;
+}

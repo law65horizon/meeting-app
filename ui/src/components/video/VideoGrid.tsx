@@ -1,241 +1,220 @@
-/**
- * VideoGrid.tsx
- *
- * Responsive video grid that uses CSS Grid auto-placement (no hardcoded
- * grid-template-areas per count). Supports grid, focus and presentation
- * layouts. Overflow strip on the right (desktop) or bottom (mobile).
- */
-import { useState, useMemo } from "react";
-import { Box, useTheme, useMediaQuery } from "@mui/material";
-import ParticipantVideo from "./ParticipantVideo";
-import { Participant } from "../../types";
+import { Box } from '@mui/material';
+import VideoTile from './VideoTile';
+import { useMeetingStore } from '../../store/meetingStore';
+import type { RemoteStream } from '../../types';
+import { useAuthStore } from '../../store/authStore';
 
-interface VideoGridProps {
-  participants: Participant[];
-  layout: "grid" | "focus" | "presentation";
-  screenShareParticipantId?: string;
-  streams: { [peerId: string]: MediaStream };
+interface LocalParticipant {
+  socketId: string;
+  displayName: string;
+  photoURL?: string | null;
+  isLocal: true;
+  stream: MediaStream | null;
+  isMicOn: boolean;
+  isCameraOn: boolean;
+  isHost: boolean;
+  role: 'host' | 'broadcaster' | 'viewer' | 'participant';
 }
 
-/** How many columns to use for N participants on each breakpoint. */
-function colCount(n: number, isDesktop: boolean, isTablet: boolean): number {
-  if (isDesktop) {
-    if (n <= 1) return 1;
-    if (n <= 4) return 2;
-    if (n <= 9) return 3;
-    return 4;
-  }
-  if (isTablet) {
-    if (n <= 1) return 1;
-    if (n <= 4) return 2;
-    return 3;
-  }
-  // mobile
-  return n === 1 ? 1 : 2;
+interface Props {
+  localMicOn: boolean;
+  localCameraOn: boolean;
+  onPinToggle: (socketId: string) => void;
+  onMuteParticipant: (socketId: string) => void;
+  onKickParticipant: (socketId: string) => void;
+  isHostUser: boolean;
 }
 
-const STRIP_W = 200; // desktop side strip width (px)
-const STRIP_H = 120; // mobile bottom strip height (px)
+function createMockRemoteStreams(count: number): RemoteStream[] {
+  const mocks: RemoteStream[] = [];
 
-const VideoGrid = ({
-  participants,
-  layout,
-  screenShareParticipantId,
-  streams,
-}: VideoGridProps) => {
-  const theme = useTheme();
-  const isDesktop = useMediaQuery(theme.breakpoints.up("lg"));
-  const isTablet = useMediaQuery(theme.breakpoints.between("md", "lg"));
-  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
+  for (let i = 0; i < count; i++) {
+    mocks.push({
+      socketId: `mock-${i}`,
+      displayName: `User ${i + 1}`,
+      photoURL: null,
+      videoStream: null,
+      audioStream: null,
+      audioLevel: Math.random(),
+      isHost: i === 0,
+      role: i === 0 ? 'host' : 'participant',
+    } as RemoteStream);
+  }
 
-  const [focusedId, setFocusedId] = useState<string | null>(null);
+  return mocks;
+}
 
-  const localParticipant = useMemo(() => {
-    try {
-      const u = JSON.parse(localStorage.getItem("user") || "{}");
-      return participants.find((p) => p.id === u.id) ?? participants[0];
-    } catch {
-      return participants[0];
-    }
-  }, [participants]);
+export default function VideoGrid({
+  localMicOn, localCameraOn, onPinToggle,
+  onMuteParticipant, onKickParticipant, isHostUser,
+}: Props) {
+  const {
+    localStream, remoteStreams, layoutMode, pinnedSocketId, localScreenStream,
+    activeSpeakerSocketId, mySocketId, myRole, room, participants, isScreenSharing
+  } = useMeetingStore();
+  const { user } = useAuthStore();
 
-  const { main, strip } = useMemo(() => {
-    const MAX = isDesktop ? 12 : isTablet ? 9 : 6;
-    let main: Participant[] = [];
-    let strip: Participant[] = [];
+  const displayName = user?.displayName || user?.email || 'You';
+  const photoURL = user?.photoURL;
+  // Build tile list
+  const remoteTiles = Array.from(remoteStreams.values());
+  // const remoteTiles = createMockRemoteStreams(100)
+  const localParticipant = participants.find((p) => p.socketId === mySocketId);
 
-    if (layout === "presentation" && screenShareParticipantId) {
-      const sharer = participants.find((p) => p.id === screenShareParticipantId);
-      main = sharer ? [sharer] : participants.slice(0, MAX);
-      strip = participants.filter((p) => p.id !== screenShareParticipantId);
-    } else if (layout === "focus" && focusedId) {
-      const focused = participants.find((p) => p.id === focusedId);
-      main = focused ? [focused] : participants.slice(0, MAX);
-      strip = participants.filter((p) => p.id !== focusedId);
-    } else {
-      main = participants.slice(0, MAX);
-      strip = participants.slice(MAX);
-    }
+  function getTileProps(sid: string, remote: RemoteStream) {
+    const participant = participants.find((p) => p.socketId === sid);
+    return {
+      socketId: sid,
+      displayName: remote.displayName,
+      photoURL: remote.photoURL,
+      videoStream: remote.videoStream,
+      audioStream: remote.audioStream,
+      audioLevel: remote.audioLevel,
+      isMuted: !remote.audioStream,
+      isCameraOff: !remote.videoStream || remote.videoStream.getVideoTracks().length === 0 || !remote.videoStream.getVideoTracks()[0].enabled,
+      isHost: remote.isHost || participant?.isHost || false,
+      isSpeaking: activeSpeakerSocketId === sid,
+      isPinned: pinnedSocketId === sid,
+      role: remote.role || participant?.role || 'participant',
+      onPin: () => onPinToggle(sid),
+      onMute: isHostUser ? () => onMuteParticipant(sid) : undefined,
+      onKick: isHostUser ? () => onKickParticipant(sid) : undefined,
+      showControls: isHostUser,
+    };
+  }
 
-    return { main, strip };
-  }, [participants, layout, screenShareParticipantId, focusedId, isDesktop, isTablet]);
+  // Spotlight / pinned mode
+  if (layoutMode === 'spotlight' || pinnedSocketId) {
+    const pinnedSid = pinnedSocketId || activeSpeakerSocketId || remoteTiles[0]?.socketId;
+    const pinnedRemote = pinnedSid ? remoteStreams.get(pinnedSid) : null;
+    const others = remoteTiles.filter((r) => r.socketId !== pinnedSid);
 
-  // ── Key mismatch diagnostic ──────────────────────────────────────────────
-  // If streams[p.id] is undefined for a participant, the peerId used in
-  // App.tsx upsertTrack() doesn't match participant.id from Firestore.
-  // Check the [newProducer] log: appData.peerId must equal participant.id.
-  const streamKeys = Object.keys(streams);
-  const participantIds = participants.map((p) => p.id);
-  const unmapped = participantIds.filter((id) => !streams[id]);
-  if (unmapped.length > 0 && streamKeys.length > 0) {
-    console.warn(
-      "%c[VideoGrid] STREAM KEY MISMATCH — participants with no stream:",
-      "color:#f87171; font-weight:bold",
-      unmapped,
-      "\nStream keys available:", streamKeys,
-      "\nFix: appData.peerId in App.tsx must equal participant.id in Firestore"
+    return (
+      <Box sx={{ display: 'flex', gap: 1.5, height: '100%', p: 1.5 }}>
+        {/* Main */}
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          {pinnedRemote ? (
+            <VideoTile {...getTileProps(pinnedSid!, pinnedRemote)} size="large" />
+          ) : (
+            <VideoTile
+              socketId={mySocketId || 'local'}
+              displayName={displayName}
+              photoURL={photoURL}
+              videoStream={localStream}
+              isMuted={!localMicOn}
+              screenStream={localScreenStream}
+              isScreenShare={isScreenSharing}
+              isCameraOff={!localCameraOn}
+              isLocal isHost={isHostUser}
+              isSpeaking={activeSpeakerSocketId === mySocketId}
+              isPinned={pinnedSocketId === mySocketId}
+              role={myRole || 'participant'}
+              onPin={() => onPinToggle(mySocketId || 'local')}
+              size="large"
+            />
+          )}
+        </Box>
+        {/* Strip */}
+        <Box sx={{ width: 160, display: 'flex', flexDirection: 'column', gap: 1, overflowY: 'auto' }}>
+          {pinnedSid !== mySocketId && (
+            <VideoTile
+              socketId={mySocketId || 'local'}
+              displayName={displayName}
+              photoURL={photoURL}
+              videoStream={localStream}
+              isMuted={!localMicOn}
+              isCameraOff={!localCameraOn}
+              isLocal isHost={isHostUser}
+              role={myRole || 'participant'}
+              onPin={() => onPinToggle(mySocketId || 'local')}
+              size="small"
+            />
+          )}
+          {others.map((r) => (
+            <VideoTile key={r.socketId} {...getTileProps(r.socketId, r)} size="small" />
+          ))}
+        </Box>
+      </Box>
     );
   }
 
-  const cols = colCount(main.length, isDesktop, isTablet);
-  const hasStrip = strip.length > 0;
+  // Broadcast mode: full-screen broadcaster, local viewer in corner
+  if (room?.mode === 'broadcast' && (myRole === 'viewer')) {
+    // const broadcaster = remoteTiles.find((r) => r.role === 'broadcaster');
+    // In VideoGrid broadcast viewer path:
+const broadcaster = remoteTiles.find((r) => r.role === 'broadcaster') 
+  || remoteTiles.find((r) => r.videoStream !== null)
+  || remoteTiles[0];
+    return (
+      <Box sx={{ position: 'relative', height: '100%', p: 1.5 }}>
+        {broadcaster ? (
+          <Box sx={{ height: '100%' }}>
+            <VideoTile {...getTileProps(broadcaster.socketId, broadcaster)} size="large" />
+          </Box>
+        ) : (
+          <Box sx={{
+            height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#475569', flexDirection: 'column', gap: 2,
+          }}>
+            <Box sx={{ fontSize: 48 }}>📡</Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <Box sx={{ fontSize: '1rem', fontWeight: 600, color: '#64748B' }}>Waiting for broadcaster</Box>
+              <Box sx={{ fontSize: '0.8rem', color: '#475569', mt: 0.5 }}>The host hasn't started streaming yet</Box>
+            </Box>
+          </Box>
+        )}
+        {/* Local viewer in corner */}
+        <Box sx={{ position: 'absolute', bottom: 24, right: 24, width: 160 }}>
+          <VideoTile
+            socketId={mySocketId || 'local'}
+            displayName={displayName}
+            photoURL={photoURL}
+            videoStream={null}
+            isCameraOff
+            isMuted={!localMicOn}
+            isLocal role="viewer"
+            size="small"
+          />
+        </Box>
+      </Box>
+    );
+  }
+
+  // Grid mode
+  const allTiles = [
+    { isLocal: true as const, socketId: mySocketId || 'local' },
+    ...remoteTiles.map((r) => ({ isLocal: false as const, socketId: r.socketId })),
+  ];
+  const count = allTiles.length;
+
+  const cols = count <= 1 ? 1 : count <= 4 ? 2 : count <= 9 ? 3 : 4;
 
   return (
-    <Box
-      sx={{
-        position: "relative",
-        width: "100%",
-        height: "100%",
-        bgcolor: "#0a0a0f",
-        overflow: "hidden",
-      }}
-    >
-      {/* ── Main Grid ── */}
-      <Box
-        sx={{
-          position: "absolute",
-          inset: 0,
-          right: !isMobile && hasStrip ? `${STRIP_W + 8}px` : 0,
-          bottom: isMobile && hasStrip ? `${STRIP_H + 8}px` : 0,
-          display: "grid",
-          gridTemplateColumns: `repeat(${cols}, 1fr)`,
-          gridAutoRows: "1fr",
-          gap: { xs: "4px", sm: "6px" },
-          p: { xs: "4px", sm: "8px" },
-          boxSizing: "border-box",
-        }}
-      >
-        {main.map((p) => (
-          <Box
-            key={p.id}
-            onClick={() => layout === "grid" && setFocusedId(p.id === focusedId ? null : p.id)}
-            sx={{
-              borderRadius: "10px",
-              overflow: "hidden",
-              cursor: layout === "grid" ? "pointer" : "default",
-              outline: p.id === focusedId ? "2px solid #6ee7b7" : "none",
-              outlineOffset: "-2px",
-              position: "relative",
-              transition: "outline 0.15s",
-            }}
-          >
-            <ParticipantVideo
-              participant={p}
-              isLocal={p.id === localParticipant?.id}
-              isFocused={p.id === focusedId}
-              onClick={() => {}}
-              stream={streams[p.id]}
-            />
-          </Box>
-        ))}
-      </Box>
-
-      {/* ── Side strip (desktop/tablet) ── */}
-      {!isMobile && hasStrip && (
-        <Box
-          sx={{
-            position: "absolute",
-            top: 0,
-            right: 0,
-            width: `${STRIP_W}px`,
-            bottom: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: "6px",
-            p: "8px",
-            overflowY: "auto",
-            bgcolor: "rgba(0,0,0,0.3)",
-            borderLeft: "1px solid rgba(255,255,255,0.05)",
-            boxSizing: "border-box",
-          }}
-        >
-          {strip.map((p) => (
-            <Box
-              key={p.id}
-              onClick={() => setFocusedId(p.id)}
-              sx={{
-                flexShrink: 0,
-                height: 120,
-                borderRadius: "8px",
-                overflow: "hidden",
-                cursor: "pointer",
-                "&:hover": { outline: "2px solid rgba(110,231,183,0.4)" },
-              }}
-            >
-              <ParticipantVideo
-                participant={p}
-                isLocal={p.id === localParticipant?.id}
-                height="100%"
-                width="100%"
-              />
-            </Box>
-          ))}
-        </Box>
-      )}
-
-      {/* ── Bottom strip (mobile) ── */}
-      {isMobile && hasStrip && (
-        <Box
-          sx={{
-            position: "absolute",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: `${STRIP_H}px`,
-            display: "flex",
-            flexDirection: "row",
-            gap: "6px",
-            p: "6px",
-            overflowX: "auto",
-            bgcolor: "rgba(0,0,0,0.4)",
-            borderTop: "1px solid rgba(255,255,255,0.05)",
-            boxSizing: "border-box",
-          }}
-        >
-          {strip.map((p) => (
-            <Box
-              key={p.id}
-              onClick={() => setFocusedId(p.id)}
-              sx={{
-                flexShrink: 0,
-                width: 90,
-                borderRadius: "8px",
-                overflow: "hidden",
-                cursor: "pointer",
-              }}
-            >
-              <ParticipantVideo
-                participant={p}
-                isLocal={p.id === localParticipant?.id}
-                height="100%"
-                width="100%"
-              />
-            </Box>
-          ))}
-        </Box>
-      )}
+    <Box sx={{
+      display: 'grid',
+      gridTemplateColumns: `repeat(${cols}, 1fr)`,
+      gap: 1.5, p: 1.5, height: '100%',
+      alignContent: 'start',
+      overflowY: 'auto',
+    }}>
+      {/* Local tile */}
+      <VideoTile
+        socketId={mySocketId || 'local'}
+        displayName={displayName}
+        photoURL={photoURL}
+        videoStream={localStream}
+        isMuted={!localMicOn}
+        isCameraOff={!localCameraOn}
+        isLocal isHost={isHostUser}
+        isSpeaking={activeSpeakerSocketId === mySocketId}
+        isPinned={pinnedSocketId === mySocketId}
+        role={myRole || 'participant'}
+        onPin={() => onPinToggle(mySocketId || 'local')}
+      />
+      {/* Remote tiles */}
+      {remoteTiles.map((r) => (
+        <VideoTile key={r.socketId} {...getTileProps(r.socketId, r)} />
+      ))}
     </Box>
-  );
-};
-
-export default VideoGrid;
+  ); 
+}

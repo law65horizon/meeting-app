@@ -1,93 +1,125 @@
 import { create } from 'zustand';
-import { User } from '../types';
-import { createUser, logout as firebaseLogout, signIn } from '../lib/firebase';
-import { auth } from '../lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import type { User } from 'firebase/auth';
 
 interface AuthState {
-  isAuthenticated: boolean;
   user: User | null;
-  tempUser: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
-  signup: (email: string, password: string, name?: string) => Promise<boolean>;
-  logout: () => void;
-  initAuth: () => () => void;
   setUser: (user: User | null) => void;
-  setTempUser: (tempUser: User | null) => void;
+  setLoading: (v: boolean) => void;
 }
 
-const useAuthStore = create<AuthState>((set) => ({
-  isAuthenticated: false,
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  tempUser: null,
   loading: true,
-
-  login: async (email, password) => {
-    try {
-      const firebaseUser: any = await signIn(email, password);
-      if (firebaseUser) {
-        const user: User = {
-          id: firebaseUser.uid,
-          name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-          email: firebaseUser.email || '',
-        };
-        set({ isAuthenticated: true, user });
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Login error:', error);
-      return false;
-    }
-  },
-
-  signup: async (email, password, name) => {
-    try {
-      const firebaseUser: any = await createUser(email, password, name);
-      if (firebaseUser) {
-        const user: User = {
-          id: firebaseUser.uid,
-          name: name || firebaseUser.email?.split('@')[0] || 'User',
-          email: firebaseUser.email || '',
-        };
-        set({ isAuthenticated: true, user });
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Signup error:', error);
-      return false;
-    }
-  },
-
-  logout: () => {
-    firebaseLogout();
-    set({ isAuthenticated: false, user: null, tempUser: null });
-  },
-
-  /**
-   * Subscribe to Firebase auth state. Call once at app root.
-   * Returns an unsubscribe function.
-   */
-  initAuth: () => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
-        const user: User = {
-          id: firebaseUser.uid,
-          name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-          email: firebaseUser.email || '',
-        };
-        set({ isAuthenticated: true, user, loading: false });
-      } else {
-        set({ isAuthenticated: false, user: null, loading: false });
-      }
-    });
-    return unsubscribe;
-  },
-
   setUser: (user) => set({ user }),
-  setTempUser: (tempUser) => set({ tempUser }),
+  setLoading: (loading) => set({ loading }),
 }));
 
-export default useAuthStore;
+// import { create } from 'zustand';
+// import {
+//   signInWithPopup,
+//   signInWithEmailAndPassword,
+//   createUserWithEmailAndPassword,
+//   signOut,
+//   onAuthStateChanged,
+//   updateProfile,
+//   type User,
+// } from 'firebase/auth';
+// import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+// import { auth, db, googleProvider } from '../lib/firebase';
+// import { connectSocket, disconnectSocket } from '../lib/socket';
+
+// interface AuthState {
+//   user: User | null;
+//   token: string | null;
+//   loading: boolean;
+//   error: string | null;
+//   // Actions
+//   init: () => () => void;
+//   signInGoogle: () => Promise<void>;
+//   signInEmail: (email: string, password: string) => Promise<void>;
+//   signUpEmail: (email: string, password: string, displayName: string) => Promise<void>;
+//   logout: () => Promise<void>;
+//   clearError: () => void;
+//   refreshToken: () => Promise<string | null>;
+// }
+
+// async function upsertUserDoc(user: User): Promise<void> {
+//   const ref = doc(db, 'users', user.uid);
+//   const snap = await getDoc(ref);
+//   if (!snap.exists()) {
+//     await setDoc(ref, {
+//       uid: user.uid,
+//       displayName: user.displayName,
+//       email: user.email,
+//       photoURL: user.photoURL,
+//       createdAt: serverTimestamp(),
+//     });
+//   }
+// }
+
+// export const useAuthStore = create<AuthState>((set, get) => ({
+//   user: null,
+//   token: null,
+//   loading: true,
+//   error: null,
+
+//   init: () => {
+//     const unsub = onAuthStateChanged(auth, async (user) => {
+//       if (user) {
+//         const token = await user.getIdToken();
+//         set({ user, token, loading: false });
+//         connectSocket(token);
+//         await upsertUserDoc(user);
+//       } else {
+//         disconnectSocket();
+//         set({ user: null, token: null, loading: false });
+//       }
+//     });
+//     return unsub;
+//   },
+
+//   refreshToken: async () => {
+//     const user = auth.currentUser;
+//     if (!user) return null;
+//     const token = await user.getIdToken(true);
+//     set({ token });
+//     connectSocket(token);
+//     return token;
+//   },
+
+//   signInGoogle: async () => {
+//     set({ error: null });
+//     try {
+//       await signInWithPopup(auth, googleProvider);
+//     } catch (err) {
+//       set({ error: (err as Error).message });
+//     }
+//   },
+
+//   signInEmail: async (email, password) => {
+//     set({ error: null });
+//     try {
+//       await signInWithEmailAndPassword(auth, email, password);
+//     } catch (err) {
+//       set({ error: (err as Error).message });
+//     }
+//   },
+
+//   signUpEmail: async (email, password, displayName) => {
+//     set({ error: null });
+//     try {
+//       const cred = await createUserWithEmailAndPassword(auth, email, password);
+//       await updateProfile(cred.user, { displayName });
+//     } catch (err) {
+//       set({ error: (err as Error).message });
+//     }
+//   },
+
+//   logout: async () => {
+//     await signOut(auth);
+//   },
+
+//   clearError: () => set({ error: null }),
+// }));
+

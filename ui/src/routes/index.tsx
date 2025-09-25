@@ -48,7 +48,7 @@ const router = createBrowserRouter([
           { path: 'start-meeting', element: <StartMeetingPage /> },
           { path: 'settings', element: <SettingsPage /> },
           { path: 'profile', element: <ProfilePage /> },
-          { path: 'support', element: <SupportPage /> },
+          // { path: 'support', element: <SupportPage /> },
         ],
       },
       {
@@ -59,6 +59,10 @@ const router = createBrowserRouter([
         // Meeting room is accessible to guests too (they join with a code)
         path: 'meeting/:roomId',
         element: <MeetingRoom />,
+      },
+      {
+        path: 'support',
+        element: <SupportPage />
       },
       {
         path: '*',

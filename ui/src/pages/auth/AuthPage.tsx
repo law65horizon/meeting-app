@@ -1,183 +1,204 @@
 import { useState } from 'react';
 import {
-  Container,
-  Box,
-  TextField,
-  Button,
-  Typography,
-  Paper,
-  Grid,
-  Link,
-  useMediaQuery,
-  useTheme,
-  CircularProgress,
-  Alert,
+  Box, Typography, TextField, Button, Divider, IconButton,
+  InputAdornment, CircularProgress, Stack, alpha,
 } from '@mui/material';
+import { Visibility, VisibilityOff, Google } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import { VideoIcon } from 'lucide-react';
-import useAuthStore from '../../store/authStore';
-import JoinMeetingDialog from '../../components/ui/JoinMeetingDialog';
+import toast from 'react-hot-toast';
+import {
+  auth, googleProvider, signInWithPopup,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile,
+} from '../../lib/firebase';
+import JoinMeetingDialog from '../../components/dialogs/JoinMeetingDialog';
 
-const AuthPage = () => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [name, setName] = useState('');
+export default function AuthPage() {
+  const navigate = useNavigate();
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [joinOpen,   setJoinOpen]   = useState(false);
+  
 
-  const theme = useTheme();
-  const isSmallScreen = useMediaQuery(theme.breakpoints.down('md'));
-  const navigate = useNavigate();
-  const { login, signup } = useAuthStore();
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-
-    if (!email || !password) {
-      setError('Please fill in all required fields.');
-      return;
-    }
-    if (!isLogin && !name) {
-      setError('Please enter your name.');
-      return;
-    }
-
+  async function handleGoogle() {
     setLoading(true);
     try {
-      const success = isLogin
-        ? await login(email, password)
-        : await signup(email, password, name);
-
-      if (success) {
-        navigate('/');
-      } else {
-        setError(isLogin ? 'Invalid email or password.' : 'Failed to create account.');
-      }
-    } catch (err: any) {
-      setError(err.message || 'An unexpected error occurred.');
+      await signInWithPopup(auth, googleProvider);
+      navigate('/');
+    } catch (e: unknown) {
+      toast.error('Google sign-in failed');
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  async function handleEmail() {
+    if (!email || !password) return toast.error('Fill in all fields');
+    setLoading(true);
+    try {
+      if (mode === 'signup') {
+        if (!name.trim()) return toast.error('Enter your name');
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(cred.user, { displayName: name.trim() });
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+      navigate('/');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Auth failed';
+      toast.error(msg.replace('Firebase: ', '').replace(/\(auth\/.*\)/, '').trim());
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <Container component="main" maxWidth="lg">
-      <Box sx={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Grid container sx={{ height: isSmallScreen ? 'auto' : '80vh' }}>
-          {!isSmallScreen && (
-            <Grid
-              item
-              md={6}
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#080A0E',
+        backgroundImage: `
+          radial-gradient(ellipse 80% 60% at 15% -5%, rgba(99,102,241,0.18) 0%, transparent 55%),
+          radial-gradient(ellipse 50% 40% at 85% 105%, rgba(16,185,129,0.1) 0%, transparent 55%)
+        `,
+        backgroundAttachment: 'fixed',
+        p: 2,
+      }}
+    >
+      {/* Decorative grid */}
+      <Box sx={{
+        position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 0,
+        backgroundImage: 'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)',
+        backgroundSize: '60px 60px',
+      }} />
+
+      <Box sx={{ position: 'relative', zIndex: 1, width: '100%', maxWidth: 420 }}>
+        {/* Logo */}
+        <Stack alignItems="center" mb={4}>
+          <Box sx={{
+            width: 52, height: 52, borderRadius: '14px', mb: 2,
+            background: 'linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 8px 32px rgba(99,102,241,0.4)',
+          }}>
+            <Typography sx={{ fontSize: 22, lineHeight: 1 }}>〜</Typography>
+          </Box>
+          <Typography variant="h4" sx={{ fontFamily: '"Sora", sans-serif', fontWeight: 700, color: '#F1F5F9', letterSpacing: '-0.03em' }}>
+            MeetWave
+          </Typography>
+          <Typography variant="body2" sx={{ color: '#64748B', mt: 0.5 }}>
+            Crystal-clear video meetings, instantly
+          </Typography>
+        </Stack>
+
+        {/* Card */}
+        <Box sx={{
+          background: 'rgba(15,17,23,0.85)',
+          backdropFilter: 'blur(24px)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: '20px',
+          p: 3.5,
+          boxShadow: '0 24px 80px rgba(0,0,0,0.5)',
+        }}>
+          {/* Tab switcher */}
+          <Box sx={{
+            display: 'flex', gap: 0.5, mb: 3,
+            background: 'rgba(255,255,255,0.04)',
+            borderRadius: '10px', p: 0.5,
+          }}>
+            {(['login', 'signup'] as const).map((m) => (
+              <Box
+                key={m}
+                onClick={() => setMode(m)}
+                sx={{
+                  flex: 1, textAlign: 'center', py: 1, borderRadius: '8px',
+                  cursor: 'pointer', transition: 'all 0.2s',
+                  background: mode === m ? 'rgba(99,102,241,0.2)' : 'transparent',
+                  border: mode === m ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
+                  color: mode === m ? '#818CF8' : '#64748B',
+                  fontFamily: '"DM Sans", sans-serif', fontWeight: 600, fontSize: '0.875rem',
+                  '&:hover': { color: mode === m ? '#818CF8' : '#94A3B8' },
+                }}
+              >
+                {m === 'login' ? 'Sign in' : 'Create account'}
+              </Box>
+            ))}
+          </Box>
+
+          <Stack spacing={2}>
+            {mode === 'signup' && (
+              <TextField
+                fullWidth size="small" label="Display name"
+                value={name} onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleEmail()}
+              />
+            )}
+            <TextField
+              fullWidth size="small" label="Email address" type="email"
+              value={email} onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleEmail()}
+            />
+            <TextField
+              fullWidth size="small" label="Password"
+              type={showPw ? 'text' : 'password'}
+              value={password} onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleEmail()}
+              InputProps={{
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={() => setShowPw(!showPw)} sx={{ color: '#64748B' }}>
+                      {showPw ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+            />
+
+            <Button
+              fullWidth variant="contained" size="large"
+              onClick={handleEmail} disabled={loading}
+              sx={{ mt: 0.5, py: 1.3, fontWeight: 700 }}
+            >
+              {loading ? <CircularProgress size={20} color="inherit" /> : mode === 'login' ? 'Sign in' : 'Create account'}
+            </Button>
+
+            <Divider sx={{ '&::before, &::after': { borderColor: 'rgba(255,255,255,0.07)' } }}>
+              <Typography variant="caption" sx={{ color: '#475569', px: 1 }}>or continue with</Typography>
+            </Divider>
+
+            <Button
+              fullWidth variant="outlined" size="large"
+              startIcon={<Google />} onClick={handleGoogle} disabled={loading}
               sx={{
-                backgroundImage: 'url(https://images.pexels.com/photos/3184291/pexels-photo-3184291.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2)',
-                backgroundRepeat: 'no-repeat',
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-                borderRadius: '16px 0 0 16px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'flex-end',
-                p: 4,
+                py: 1.3, borderColor: 'rgba(255,255,255,0.1)',
+                '&:hover': { borderColor: 'rgba(255,255,255,0.25)', background: alpha('#fff', 0.04) },
               }}
             >
-              <Box sx={{ backgroundColor: 'rgba(0,0,0,0.5)', p: 3, borderRadius: 2, backdropFilter: 'blur(10px)' }}>
-                <Typography variant="h4" sx={{ color: 'white', fontWeight: 700, mb: 2 }}>
-                  Connect with your team anywhere, anytime
-                </Typography>
-                <Typography sx={{ color: 'white' }}>
-                  Secure, high-quality video meetings for teams of all sizes.
-                </Typography>
-              </Box>
-            </Grid>
-          )}
+              Google
+            </Button>
 
-          <Grid
-            item
-            xs={12}
-            md={6}
-            component={Paper}
-            elevation={isSmallScreen ? 2 : 0}
-            sx={{ p: 4, display: 'flex', flexDirection: 'column', justifyContent: 'center', borderRadius: isSmallScreen ? '16px' : '0 16px 16px 0' }}
-          >
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', maxWidth: 400, mx: 'auto', width: '100%' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                <VideoIcon color={theme.palette.primary.main} size={32} />
-                <Typography variant="h4" sx={{ ml: 1, fontWeight: 'bold', color: 'primary.main' }}>
-                  MeetApp
-                </Typography>
-              </Box>
+            <Button
+              fullWidth variant="outlined" size="large"
+              onClick={() => setJoinOpen(true)} disabled={loading}
+              sx={{ mt: 0.5, py: 1.3, fontWeight: 700 }}
+            >
+              {loading ? <CircularProgress size={20} color="inherit" /> : 'Join Meeting'}
+            </Button>
+          </Stack>
+        </Box>
 
-              <Typography component="h1" variant="h5" sx={{ mb: 3 }}>
-                {isLogin ? 'Sign in' : 'Create your account'}
-              </Typography>
-
-              {error && <Alert severity="error" sx={{ mb: 2, width: '100%' }}>{error}</Alert>}
-
-              <Box component="form" onSubmit={handleSubmit} sx={{ width: '100%' }}>
-                {!isLogin && (
-                  <TextField
-                    margin="normal"
-                    required
-                    fullWidth
-                    label="Full Name"
-                    autoComplete="name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    disabled={loading}
-                  />
-                )}
-                <TextField
-                  margin="normal"
-                  required
-                  fullWidth
-                  label="Email Address"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={loading}
-                />
-                <TextField
-                  margin="normal"
-                  required
-                  fullWidth
-                  label="Password"
-                  type="password"
-                  autoComplete={isLogin ? 'current-password' : 'new-password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  disabled={loading}
-                />
-
-                <Button type="submit" fullWidth variant="contained" sx={{ mt: 3, mb: 2, py: 1.5 }} disabled={loading}>
-                  {loading ? <CircularProgress size={24} /> : isLogin ? 'Sign In' : 'Sign Up'}
-                </Button>
-
-                <Grid container justifyContent="center">
-                  <Grid item>
-                    <Link
-                      href="#"
-                      variant="body2"
-                      onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setError(''); }}
-                    >
-                      {isLogin ? "Don't have an account? Sign Up" : 'Already have an account? Sign In'}
-                    </Link>
-                  </Grid>
-                </Grid>
-
-                <Button fullWidth variant="outlined" sx={{ mt: 2, py: 1.5 }} onClick={() => setJoinDialogOpen(true)}>
-                  Join Meeting as Guest
-                </Button>
-              </Box>
-            </Box>
-          </Grid>
-        </Grid>
+        <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', color: '#334155', mt: 3 }}>
+          By continuing you agree to our Terms of Service
+        </Typography>
       </Box>
-      <JoinMeetingDialog joinDialogOpen={joinDialogOpen} setJoinDialogOpen={setJoinDialogOpen} />
-    </Container>
-  );
-};
 
-export default AuthPage;
+      <JoinMeetingDialog   open={joinOpen}   onClose={() => setJoinOpen(false)} /> 
+    </Box>
+  );
+}

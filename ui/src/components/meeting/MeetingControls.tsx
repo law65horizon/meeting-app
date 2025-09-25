@@ -1,381 +1,525 @@
-/**
- * MeetingControls.tsx
- *
- * Polished dark-glass control bar.
- * Reads state from useNewMeetingStore and fires the callbacks that
- * App.tsx wires in via setCallbacks().
- */
-import { useState } from "react";
+import { useState } from 'react';
 import {
-  Box,
-  IconButton,
-  Tooltip,
-  Button,
-  useTheme,
-  useMediaQuery,
-  Badge,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Typography,
-  Fade,
-} from "@mui/material";
+  Box, IconButton, Tooltip, Typography, Badge, Button,
+  Popover, Stack, alpha, Divider, Menu, MenuItem, ListItemIcon, useTheme, useMediaQuery,
+} from '@mui/material';
 import {
-  Mic,
-  MicOff,
-  Video,
-  VideoOff,
-  Monitor,
-  MonitorOff,
-  PhoneOff,
-  MessageSquare,
-  Users,
-  Settings,
-  ChevronUp,
-} from "lucide-react";
-import { useNewMeetingStore } from "../../store/newMeetingStore";
-import DeviceSettings from "./DeviceSettings";
-import ChatPanel from "../chat/ChatPanel";
-import ParticipantsList from "./ParticipantsList";
-import useMeetingStore from "../../store/meetingStore";
+  Mic, MicOff, Videocam, VideocamOff, ScreenShare, StopScreenShare,
+  Chat, PeopleAlt, EmojiEmotions, GridView, ViewSidebar,
+  CallEnd, MoreVert, FiberManualRecord, Stop, Lock, LockOpen,
+  CastForEducation,
+} from '@mui/icons-material';
+import { useMeetingStore } from '../../store/meetingStore';
+import type { RoomMode } from '../../types';
 
-interface MeetingControlsProps {
+const REACTIONS = ['👍', '❤️', '😂', '😮', '👏', '🎉', '🔥', '💯'];
+
+interface Props {
+  onToggleMic: () => void;
+  onToggleCamera: () => void;
+  onToggleScreen: () => void;
   onLeave: () => void;
-  onToggleChat: () => void;
-  onToggleParticipants: () => void;
-  unreadMessages: number;
+  onEndRoom?: () => void;
+  onToggleLock?: () => void;
+  onMuteAll?: () => void;
+  onReaction: (emoji: string) => void;
+  onToggleLayout: () => void;
+  isRecording?: boolean;
+  onToggleRecording?: () => void;
+  isHost: boolean;
+  roomMode: RoomMode;
+  canProduce: boolean;
 }
 
-// ── Shared icon button styling ────────────────────────────────────────────────
-const ctrlBtn = (active: boolean, danger = false) => ({
-  width: 44,
-  height: 44,
-  borderRadius: "50%",
-  transition: "all 0.2s ease",
-  bgcolor: danger
-    ? "rgba(239,68,68,0.15)"
-    : active
-    ? "rgba(110,231,183,0.12)"
-    : "rgba(255,255,255,0.07)",
-  color: danger ? "#f87171" : active ? "#6ee7b7" : "#94a3b8",
-  border: `1px solid ${
-    danger
-      ? "rgba(239,68,68,0.25)"
-      : active
-      ? "rgba(110,231,183,0.25)"
-      : "rgba(255,255,255,0.08)"
-  }`,
-  "&:hover": {
-    bgcolor: danger
-      ? "rgba(239,68,68,0.25)"
-      : active
-      ? "rgba(110,231,183,0.2)"
-      : "rgba(255,255,255,0.12)",
-    transform: "scale(1.08)",
-  },
-  "&:active": { transform: "scale(0.95)" },
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MeetingControls = ({
-  onLeave,
-  onToggleChat,
-  onToggleParticipants,
-  unreadMessages,
-}: MeetingControlsProps) => {
+function ControlBtn({
+  icon, label, onClick, active, danger, disabled, size = 'normal',
+}: {
+  icon: React.ReactNode; label: string; onClick: (e: any) => void;
+  active?: boolean; danger?: boolean; disabled?: boolean;
+  size?: 'normal' | 'small';
+}) {
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const primary = theme.palette.primary.main;
+  const primaryLight = theme.palette.primary.light;
+  const errorColor = theme.palette.error.main;
+  const isDark = theme.palette.mode === 'dark';
 
-  const [collapsed, setCollapsed] = useState(false);
-  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  // const [chatOpen, setChatOpen] = useState(false);
-  const chatOpen = useNewMeetingStore((s) => s.isChatOpen)
-  const setChatOpen = useNewMeetingStore((s) => s.setChatOpen)
-  const [participantsOpen, setParticipantsOpen] = useState(false);
-
-  const participants = useMeetingStore((s) => s.participants);
-
-  const {
-    isAudioMuted,
-    isVideoEnabled,
-    isScreenSharing,
-    toggleAudio,
-    toggleVideo,
-    toggleScreenShare,
-  } = useNewMeetingStore();
-
-  const closeAll = () => {
-    setSettingsOpen(false);
-    setChatOpen(false);
-    setParticipantsOpen(false);
-  };
+  const btnSize = size === 'small' ? 40 : 48;
 
   return (
-    <>
-      {/* ── Control Bar ── */}
-      <Box
-        sx={{
-          position: "fixed",
-          bottom: 0,
-          left: "50%",
-          transform: "translateX(-50%)",
-          zIndex: 20,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-        }}
-      >
-        {/* Collapse toggle */}
-        {!isMobile && (
+    <Tooltip title={label} arrow placement="top">
+      <span>
+        <IconButton
+          onClick={onClick}
+          disabled={disabled}
+          sx={{
+            width: btnSize, height: btnSize,
+            borderRadius: size === 'small' ? '10px' : '12px',
+            background: danger
+              ? alpha(errorColor, 0.15)
+              : active
+                ? alpha(primary, isDark ? 0.2 : 0.12)
+                : isDark ? 'rgba(255,255,255,0.07)' : alpha(theme.palette.text.primary, 0.05),
+            color: danger
+              ? errorColor
+              : active
+                ? isDark ? primaryLight : primary
+                : theme.palette.text.secondary,
+            border: danger
+              ? `1px solid ${alpha(errorColor, 0.3)}`
+              : active
+                ? `1px solid ${alpha(primary, 0.35)}`
+                : `1px solid ${theme.palette.divider}`,
+            transition: 'all 0.15s',
+            '&:hover': {
+              background: danger
+                ? alpha(errorColor, 0.25)
+                : active
+                  ? alpha(primary, isDark ? 0.3 : 0.18)
+                  : isDark ? 'rgba(255,255,255,0.12)' : alpha(theme.palette.text.primary, 0.09),
+              transform: 'translateY(-1px)',
+            },
+            '&:disabled': { opacity: 0.35 },
+          }}
+        >
+          {icon}
+        </IconButton>
+      </span>
+    </Tooltip>
+  );
+}
+
+export default function MeetingControls({
+  onToggleMic, onToggleCamera, onToggleScreen, onLeave, onEndRoom,
+  onToggleLock, onMuteAll, onReaction, onToggleLayout,
+  isRecording, onToggleRecording, isHost, roomMode, canProduce,
+}: Props) {
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
+  const isDark = theme.palette.mode === 'dark';
+
+  const primary    = theme.palette.primary.main;
+  const error      = theme.palette.error.main;
+  const secondary  = theme.palette.secondary.main;
+  const warning    = theme.palette.warning.main;
+  const textPrimary    = theme.palette.text.primary;
+  const textSecondary  = theme.palette.text.secondary;
+  const divider    = theme.palette.divider;
+  const bgPaper    = theme.palette.background.paper;
+
+  const {
+    isMicOn, isCameraOn, isScreenSharing, isChatOpen, isParticipantsOpen,
+    unreadCount, layoutMode, room, participants,
+    setChatOpen, setParticipantsOpen,
+  } = useMeetingStore();
+
+  const [emojiAnchor, setEmojiAnchor] = useState<null | HTMLElement>(null);
+  const [moreAnchor, setMoreAnchor]   = useState<null | HTMLElement>(null);
+  const [leaving, setLeaving]         = useState(false);
+
+  async function handleLeave() {
+    setLeaving(true);
+    onLeave();
+  }
+
+  // console.log({isChatOpen})
+
+  const barBg = isDark ? 'rgba(8,10,14,0.9)' : alpha(bgPaper, 0.92);
+
+  // ── Shared popovers/menus (rendered once, outside both layouts) ───────────
+  const emojiPopover = (
+    <Popover
+      open={Boolean(emojiAnchor)}
+      anchorEl={emojiAnchor}
+      onClose={() => setEmojiAnchor(null)}
+      anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      PaperProps={{
+        sx: {
+          mb: 1, p: 1.5, borderRadius: '14px',
+          background: isDark ? 'rgba(15,17,23,0.95)' : bgPaper,
+          backdropFilter: 'blur(20px)',
+          border: `1px solid ${divider}`,
+        },
+      }}
+    >
+      <Stack direction="row" spacing={0.5} flexWrap="wrap" sx={{ maxWidth: 240 }}>
+        {REACTIONS.map((e) => (
           <IconButton
-            size="small"
-            onClick={() => setCollapsed((c) => !c)}
+            key={e} size="small"
+            onClick={() => { onReaction(e); setEmojiAnchor(null); }}
             sx={{
-              mb: 0.5,
-              width: 28,
-              height: 16,
-              borderRadius: "8px 8px 0 0",
-              bgcolor: "rgba(15,15,25,0.85)",
-              color: "#475569",
-              border: "1px solid rgba(255,255,255,0.07)",
-              borderBottom: "none",
-              "&:hover": { color: "#94a3b8" },
+              fontSize: '1.4rem', width: 40, height: 40, borderRadius: '10px',
+              '&:hover': { background: alpha(primary, 0.1), transform: 'scale(1.2)' },
+              transition: 'all 0.15s',
             }}
           >
-            <ChevronUp
-              size={14}
-              style={{
-                transform: collapsed ? "rotate(180deg)" : "rotate(0deg)",
-                transition: "transform 0.3s ease",
-              }}
-            />
+            {e}
           </IconButton>
-        )}
+        ))}
+      </Stack>
+    </Popover>
+  );
 
-        <Fade in={!collapsed} unmountOnExit>
-          <Box
+  const moreMenu = (
+    <Menu
+      anchorEl={moreAnchor}
+      open={Boolean(moreAnchor)}
+      onClose={() => setMoreAnchor(null)}
+      anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      transformOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      PaperProps={{ sx: { mb: 1, minWidth: 200 } }}
+    >
+      {isMobile && canProduce && (
+        <MenuItem onClick={() => { onToggleScreen(); setMoreAnchor(null); }}>
+          <ListItemIcon>
+            {isScreenSharing
+              ? <StopScreenShare fontSize="small" sx={{ color: primary }} />
+              : <ScreenShare fontSize="small" />}
+          </ListItemIcon>
+          {isScreenSharing ? 'Stop screen share' : 'Share screen'}
+        </MenuItem>
+      )}
+      {isMobile && (
+        <MenuItem onClick={() => { onToggleLayout(); setMoreAnchor(null); }}>
+          <ListItemIcon>
+            {layoutMode === 'spotlight' ? <GridView fontSize="small" /> : <ViewSidebar fontSize="small" />}
+          </ListItemIcon>
+          Toggle layout
+        </MenuItem>
+      )}
+      {onToggleRecording && (
+        <MenuItem onClick={() => { onToggleRecording(); setMoreAnchor(null); }}>
+          <ListItemIcon>
+            {isRecording
+              ? <Stop fontSize="small" sx={{ color: error }} />
+              : <FiberManualRecord fontSize="small" sx={{ color: error }} />}
+          </ListItemIcon>
+          {isRecording ? 'Stop recording' : 'Start recording'}
+        </MenuItem>
+      )}
+      {isHost && onToggleLock && (
+        <MenuItem onClick={() => { onToggleLock(); setMoreAnchor(null); }}>
+          <ListItemIcon>
+            {room?.isLocked ? <LockOpen fontSize="small" /> : <Lock fontSize="small" />}
+          </ListItemIcon>
+          {room?.isLocked ? 'Unlock room' : 'Lock room'}
+        </MenuItem>
+      )}
+      {isHost && onMuteAll && (
+        <MenuItem onClick={() => { onMuteAll(); setMoreAnchor(null); }}>
+          <ListItemIcon><MicOff fontSize="small" /></ListItemIcon>
+          Mute everyone
+        </MenuItem>
+      )}
+    </Menu>
+  );
+
+  // ── Mobile layout: two clean rows ─────────────────────────────────────────
+  if (isMobile) {
+    return (
+      <Box sx={{
+        background: barBg, backdropFilter: 'blur(20px)',
+        borderTop: `1px solid ${divider}`,
+        px: 1.5, pt: 1, pb: 1.5,
+        display: 'flex', flexDirection: 'column', gap: 1,
+      }}>
+        {/* Row 1 — sidebar toggles + leave (right-aligned) */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+          {canProduce ? (
+            <>
+              <ControlBtn
+                icon={isMicOn ? <Mic /> : <MicOff />}
+                label={isMicOn ? 'Mute mic' : 'Unmute mic'}
+                onClick={() => onToggleMic()}
+                active={isMicOn} danger={!isMicOn} size="small"
+              />
+              <ControlBtn
+                icon={isCameraOn ? <Videocam /> : <VideocamOff />}
+                label={isCameraOn ? 'Stop camera' : 'Start camera'}
+                onClick={() => onToggleCamera()}
+                active={isCameraOn} danger={!isCameraOn} size="small"
+              />
+            </>
+          ) : (
+            <Box sx={{
+              px: 2, py: 0.8, borderRadius: '10px',
+              background: alpha(secondary, 0.1),
+              border: `1px solid ${alpha(secondary, 0.2)}`,
+            }}>
+              <Typography sx={{ fontSize: '0.78rem', color: secondary, fontWeight: 600 }}>👁 Viewing</Typography>
+            </Box>
+          )}
+          <Badge
+            badgeContent={unreadCount} color="error"
+            sx={{ '& .MuiBadge-badge': { fontSize: '0.65rem', minWidth: 16, height: 16 } }}
+          >
+            <ControlBtn
+              icon={<Chat />} label="Chat" size="small"
+              onClick={() => { setChatOpen(!isChatOpen); if (!isChatOpen) setParticipantsOpen(false); }}
+              active={isChatOpen}
+            />
+          </Badge>
+
+          <Badge
+            badgeContent={participants.length}
             sx={{
-              display: "flex",
-              alignItems: "center",
-              gap: { xs: 0.75, sm: 1 },
-              px: { xs: 2, sm: 3 },
-              py: { xs: 1.25, sm: 1.5 },
-              mb: { xs: 0, sm: 1.5 },
-              bgcolor: "rgba(15,15,25,0.88)",
-              backdropFilter: "blur(20px)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: isMobile ? "16px 16px 0 0" : 999,
-              boxShadow: "0 -4px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)",
-              flexWrap: isMobile ? "wrap" : "nowrap",
-              justifyContent: "center",
-              width: isMobile ? "100vw" : "auto",
-              boxSizing: "border-box",
+              '& .MuiBadge-badge': {
+                fontSize: '0.65rem', minWidth: 16, height: 16,
+                background: alpha(primary, 0.3), color: theme.palette.primary.light,
+                border: `1px solid ${alpha(primary, 0.5)}`,
+              },
             }}
           >
-            {/* Audio */}
-            <Tooltip title={isAudioMuted ? "Unmute" : "Mute"} arrow>
-              <IconButton onClick={toggleAudio} sx={ctrlBtn(!isAudioMuted, isAudioMuted)}>
-                {isAudioMuted ? <MicOff size={18} /> : <Mic size={18} />}
-              </IconButton>
-            </Tooltip>
+            <ControlBtn
+              icon={<PeopleAlt />} label="Participants" size="small"
+              onClick={() => { setParticipantsOpen(!isParticipantsOpen); if (!isParticipantsOpen) setChatOpen(false); }}
+              active={isParticipantsOpen}
+            />
+          </Badge>
 
-            {/* Video */}
-            <Tooltip title={isVideoEnabled ? "Stop Video" : "Start Video"} arrow>
-              <IconButton onClick={toggleVideo} sx={ctrlBtn(isVideoEnabled, !isVideoEnabled)}>
-                {isVideoEnabled ? <Video size={18} /> : <VideoOff size={18} />}
-              </IconButton>
-            </Tooltip>
-
-            {/* Screen share */}
-            <Tooltip title={isScreenSharing ? "Stop Sharing" : "Share Screen"} arrow>
-              <IconButton onClick={toggleScreenShare} sx={ctrlBtn(isScreenSharing)}>
-                {isScreenSharing ? <MonitorOff size={18} /> : <Monitor size={18} />}
-              </IconButton>
-            </Tooltip>
-
-            {/* Participants */}
-            <Tooltip title="Participants" arrow>
-              <IconButton
-                onClick={() => {
-                  closeAll();
-                  setParticipantsOpen((v) => !v);
-                }}
-                sx={ctrlBtn(participantsOpen)}
-              >
-                <Users size={18} />
-              </IconButton>
-            </Tooltip>
-
-            {/* Chat */}
-            <Tooltip title="Chat" arrow>
-              <IconButton
-                onClick={() => {
-                  closeAll();
-                  setChatOpen(!chatOpen);
-                }}
-                sx={ctrlBtn(chatOpen)}
-              >
-                <Badge badgeContent={unreadMessages} color="error" max={99}>
-                  <MessageSquare size={18} />
-                </Badge>
-              </IconButton>
-            </Tooltip>
-
-            {/* Settings */}
-            <Tooltip title="Settings" arrow>
-              <IconButton
-                onClick={() => {
-                  closeAll();
-                  setSettingsOpen((v) => !v);
-                }}
-                sx={ctrlBtn(settingsOpen)}
-              >
-                <Settings size={18} />
-              </IconButton>
-            </Tooltip>
-
-            {/* Divider */}
-            {/* <Box
+          <Tooltip title="More options" arrow placement="top">
+            <IconButton
+              onClick={(e) => setMoreAnchor(e.currentTarget)}
               sx={{
-                width: 1,
-                height: 24,
-                bgcolor: "rgba(255,255,255,0.1)",
-                mx: 0.5,
-                display: isMobile ? "none" : "block",
-              }}
-            /> */}
-
-            {/* Leave */}
-            <Button
-              variant="contained"
-              size="small"
-              startIcon={<PhoneOff size={15} />}
-              onClick={() => setConfirmLeaveOpen(true)}
-              sx={{
-                borderRadius: 999,
-                bgcolor: "#ef4444",
-                color: "#fff",
-                fontWeight: 600,
-                fontSize: "0.8rem",
-                px: 2,
-                py: 0.75,
-                textTransform: "none",
-                "&:hover": { bgcolor: "#dc2626" },
+                width: 40, height: 40, borderRadius: '10px',
+                background: isDark ? 'rgba(255,255,255,0.07)' : alpha(textPrimary, 0.05),
+                border: `1px solid ${divider}`, color: textSecondary,
+                '&:hover': { background: isDark ? 'rgba(255,255,255,0.12)' : alpha(textPrimary, 0.09) },
               }}
             >
-              Leave
-            </Button>
+              <MoreVert />
+            </IconButton>
+          </Tooltip>
+
+          
+        </Box>
+
+        {/* Row 2 — main media controls (centered) */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+          
+
+          <ControlBtn
+            icon={<EmojiEmotions />} label="React" size="small"
+            onClick={(e: React.MouseEvent<HTMLElement>) => setEmojiAnchor(e.currentTarget as HTMLElement)}
+            active={Boolean(emojiAnchor)}
+          />
+
+          
+          {/* Leave button */}
+          <IconButton
+            onClick={handleLeave}
+            disabled={leaving}
+            sx={{
+              width: 40, height: 40, borderRadius: '10px',
+              background: alpha(error, 0.85),
+              color: '#fff',
+              border: `1px solid ${alpha(error, 0.5)}`,
+              boxShadow: `0 4px 12px ${alpha(error, 0.35)}`,
+              '&:hover': { background: '#DC2626' },
+              '&:disabled': { opacity: 0.5 },
+            }}
+          >
+            <CallEnd fontSize="small" />
+          </IconButton>
+
+          {isHost && onEndRoom && (
+            <Tooltip title="End meeting for all" arrow>
+              <IconButton
+                onClick={onEndRoom}
+                sx={{
+                  width: 40, height: 40, borderRadius: '10px',
+                  background: alpha(error, 0.15), color: error,
+                  border: `1px solid ${alpha(error, 0.3)}`,
+                  '&:hover': { background: alpha(error, 0.25) },
+                }}
+              >
+                <Stop fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+
+        {emojiPopover}
+        {moreMenu}
+        <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
+      </Box>
+    );
+  }
+
+  // ── Desktop layout: single row, three sections ───────────────────────────
+  return (
+    <Box sx={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      px: { sm: 2, md: 3 }, py: 2,
+      background: barBg, backdropFilter: 'blur(20px)',
+      borderTop: `1px solid ${divider}`,
+    }}>
+      {/* Left: room info */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: { sm: 140, md: 180 } }}>
+        <Box>
+          <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: textPrimary, lineHeight: 1.2 }}>
+            {room?.name || room?.roomId}
+          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.8, mt: 0.2, flexWrap: 'wrap' }}>
+            {roomMode === 'broadcast' && (
+              <Box sx={{
+                display: 'flex', alignItems: 'center', gap: 0.4,
+                background: alpha(secondary, 0.12),
+                border: `1px solid ${alpha(secondary, 0.25)}`,
+                borderRadius: '5px', px: 0.8, py: 0.1,
+              }}>
+                <CastForEducation sx={{ fontSize: 10, color: secondary }} />
+                <Typography sx={{ fontSize: '0.62rem', color: secondary, fontWeight: 700 }}>BROADCAST</Typography>
+              </Box>
+            )}
+            {room?.isLocked && <Lock sx={{ fontSize: 12, color: warning }} />}
+            <Typography sx={{ fontSize: '0.72rem', color: textSecondary }}>
+              {participants.length} {participants.length === 1 ? 'person' : 'people'}
+            </Typography>
           </Box>
-        </Fade>
+        </Box>
+        {isRecording && (
+          <Box sx={{
+            display: 'flex', alignItems: 'center', gap: 0.5,
+            background: alpha(error, 0.12), border: `1px solid ${alpha(error, 0.25)}`,
+            borderRadius: '6px', px: 1, py: 0.4,
+          }}>
+            <FiberManualRecord sx={{ fontSize: 10, color: error, animation: 'pulse 1.5s infinite' }} />
+            <Typography sx={{ fontSize: '0.7rem', color: error, fontWeight: 700 }}>REC</Typography>
+          </Box>
+        )}
       </Box>
 
-      {/* ── Slide-in Panels ── */}
-      {/* Settings */}
-      <Dialog
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { bgcolor: "#111827", color: "#e2e8f0", borderRadius: 3 } }}
-      >
-        <DialogTitle sx={{ fontFamily: "'Sora', sans-serif", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-          Device Settings
-        </DialogTitle>
-        <DialogContent>
-          <DeviceSettings />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSettingsOpen(false)} sx={{ color: "#6ee7b7" }}>
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Center: main controls */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {canProduce ? (
+          <>
+            <ControlBtn
+              icon={isMicOn ? <Mic /> : <MicOff />}
+              label={isMicOn ? 'Mute mic' : 'Unmute mic'}
+              onClick={() => onToggleMic()}
+              active={isMicOn} danger={!isMicOn}
+            />
+            <ControlBtn
+              icon={isCameraOn ? <Videocam /> : <VideocamOff />}
+              label={isCameraOn ? 'Stop camera' : 'Start camera'}
+              onClick={() => onToggleCamera()}
+              active={isCameraOn} danger={!isCameraOn}
+            />
+            <ControlBtn
+              icon={isScreenSharing ? <StopScreenShare /> : <ScreenShare />}
+              label={isScreenSharing ? 'Stop sharing' : 'Share screen'}
+              onClick={() => onToggleScreen()}
+              active={isScreenSharing}
+            />
+          </>
+        ) : (
+          <Box sx={{
+            px: 2, py: 1, borderRadius: '10px',
+            background: alpha(secondary, 0.1), border: `1px solid ${alpha(secondary, 0.2)}`,
+          }}>
+            <Typography sx={{ fontSize: '0.8rem', color: secondary, fontWeight: 600 }}>
+              👁 Viewing broadcast
+            </Typography>
+          </Box>
+        )}
 
-      {/* Chat */}
-      <Dialog
-        open={chatOpen}
-        onClose={() => setChatOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{
-          sx: {
-            position: "absolute",
-            right: 0,
-            top: 0,
-            m: 0,
-            height: "100%",
-            maxHeight: "100%",
-            borderRadius: "16px 0 0 16px",
-            bgcolor: "#111827",
-            color: "#e2e8f0",
-          },
-        }}
-      >
-        <DialogContent sx={{ p: 0, height: "100%" }}>
-          
-          <ChatPanel onClose={() => setChatOpen(false)} isOpen={chatOpen} />
-        </DialogContent>
-      </Dialog>
+        <Box sx={{ width: 1, height: 32, background: divider, mx: 0.5 }} />
 
-      {/* Participants */}
-      <Dialog
-        open={participantsOpen}
-        onClose={() => setParticipantsOpen(false)}
-        maxWidth="xs"
-        fullWidth
-        PaperProps={{
-          sx: {
-            position: "absolute",
-            right: 0,
-            top: 0,
-            m: 0,
-            height: "100%",
-            maxHeight: "100%",
-            borderRadius: "16px 0 0 16px",
-            bgcolor: "#111827",
-            color: "#e2e8f0",
-          },
-        }}
-      >
-        <DialogContent sx={{ p: 0 }}>
-          <ParticipantsList onClose={() => setParticipantsOpen(false)} participants={participants} />
-        </DialogContent>
-      </Dialog>
+        <ControlBtn
+          icon={<EmojiEmotions />} label="React"
+          onClick={(e: React.MouseEvent<HTMLElement>) => setEmojiAnchor(e.currentTarget as HTMLElement)}
+          active={Boolean(emojiAnchor)}
+        />
 
-      {/* Leave Confirm */}
-      <Dialog
-        open={confirmLeaveOpen}
-        onClose={() => setConfirmLeaveOpen(false)}
-        PaperProps={{ sx: { bgcolor: "#111827", color: "#e2e8f0", borderRadius: 3 } }}
-      >
-        <DialogTitle sx={{ fontFamily: "'Sora', sans-serif" }}>Leave Meeting?</DialogTitle>
-        <DialogContent>
-          <Typography sx={{ color: "#94a3b8" }}>
-            Are you sure you want to leave this meeting?
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmLeaveOpen(false)} sx={{ color: "#94a3b8" }}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => {
-              setConfirmLeaveOpen(false);
-              onLeave();
+        <ControlBtn
+          icon={layoutMode === 'spotlight' ? <GridView /> : <ViewSidebar />}
+          label="Toggle layout"
+          onClick={onToggleLayout}
+        />
+
+        <Tooltip title="More options" arrow placement="top">
+          <IconButton
+            onClick={(e) => setMoreAnchor(e.currentTarget)}
+            sx={{
+              width: 48, height: 48, borderRadius: '12px',
+              background: isDark ? 'rgba(255,255,255,0.07)' : alpha(textPrimary, 0.05),
+              border: `1px solid ${divider}`, color: textSecondary,
+              '&:hover': { background: isDark ? 'rgba(255,255,255,0.12)' : alpha(textPrimary, 0.09) },
             }}
-            variant="contained"
-            color="error"
-            sx={{ borderRadius: 999 }}
           >
-            Leave Meeting
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </>
-  );
-};
+            <MoreVert />
+          </IconButton>
+        </Tooltip>
+      </Box>
 
-export default MeetingControls;
+      {/* Right: sidebar toggles + leave */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: { sm: 140, md: 180 }, justifyContent: 'flex-end' }}>
+        <Badge
+          badgeContent={unreadCount} color="error"
+          sx={{ '& .MuiBadge-badge': { fontSize: '0.65rem', minWidth: 16, height: 16 } }}
+        >
+          <ControlBtn
+            icon={<Chat />} label="Chat"
+            onClick={() => { setChatOpen(!isChatOpen); if (!isChatOpen) setParticipantsOpen(false); }}
+            active={isChatOpen}
+          />
+        </Badge>
+
+        <Badge
+          badgeContent={participants.length}
+          sx={{
+            '& .MuiBadge-badge': {
+              fontSize: '0.65rem', minWidth: 16, height: 16,
+              background: alpha(primary, 0.3), color: theme.palette.primary.light,
+              border: `1px solid ${alpha(primary, 0.5)}`,
+            },
+          }}
+        >
+          <ControlBtn
+            icon={<PeopleAlt />} label="Participants"
+            onClick={() => { setParticipantsOpen(!isParticipantsOpen); if (!isParticipantsOpen) setChatOpen(false); }}
+            active={isParticipantsOpen}
+          />
+        </Badge>
+
+        <Button
+          variant="contained"
+          startIcon={<CallEnd />}
+          onClick={handleLeave}
+          disabled={leaving}
+          sx={{
+            background: alpha(error, 0.85), ml: 1, px: 2.5, py: 1.1,
+            fontWeight: 700, fontSize: '0.875rem',
+            boxShadow: `0 4px 16px ${alpha(error, 0.35)}`,
+            '&:hover': { background: '#DC2626', boxShadow: `0 6px 20px ${alpha(error, 0.45)}` },
+          }}
+        >
+          Leave
+        </Button>
+
+        {isHost && onEndRoom && (
+          <Tooltip title="End meeting for all" arrow>
+            <IconButton
+              onClick={onEndRoom}
+              sx={{
+                width: 40, height: 40, borderRadius: '10px',
+                background: alpha(error, 0.15), color: error,
+                border: `1px solid ${alpha(error, 0.3)}`,
+                '&:hover': { background: alpha(error, 0.25) },
+              }}
+            >
+              <Stop fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
+
+      {emojiPopover}
+      {moreMenu}
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
+    </Box>
+  );
+}

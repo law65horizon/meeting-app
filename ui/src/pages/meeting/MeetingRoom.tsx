@@ -1,582 +1,707 @@
-/**
- * MeetingRoom.tsx
- *
- * Connects to the mediasoup server via Socket.IO, manages WebRTC transports,
- * producers, consumers, and the in-meeting chat.
- *
- * Key invariants:
- * - Socket is created exactly once per (roomId, tempUser) pair.
- * - `start` is stored in a ref to avoid it being a useEffect dependency.
- * - All media cleanup happens in the effect's cleanup function.
- */
-
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Box,
-  AppBar,
-  Toolbar,
-  IconButton,
-  Typography,
-  useMediaQuery,
-  useTheme,
-  CircularProgress,
-  Snackbar,
-  Alert,
+  Box, Typography, CircularProgress, Button, Stack,
+  alpha, useTheme, useMediaQuery,
 } from '@mui/material';
-import { useParams, useNavigate } from 'react-router-dom';
-import io, { Socket } from 'socket.io-client';
-import * as mediasoupClient from 'mediasoup-client';
-import { ArrowLeft, Clock } from 'lucide-react';
+import { Lock, VideoCall } from '@mui/icons-material';
+import toast from 'react-hot-toast';
+import { auth } from '../../lib/firebase';
+import { connectSocket, getSocket } from '../../lib/socket';
+import { useAuthStore } from '../../store/authStore';
+import { useMeetingStore } from '../../store/meetingStore';
+import { useMediasoup } from '../../hooks/useMediaSoup';
+import { useTimeSync } from '../../hooks/useTimeSync';
 import VideoGrid from '../../components/video/VideoGrid';
 import MeetingControls from '../../components/meeting/MeetingControls';
-import useMeetingStore from '../../store/meetingStore';
-import useAuthStore from '../../store/authStore';
-import { useAuth } from '../../hooks/useAuth';
-import { useNewMeetingStore } from '../../store/newMeetingStore';
-import { ChatMessage, Participant, User } from '../../types';
-import { auth } from '../../lib/firebase';
+import ChatPanel from '../../components/chat/ChatPanel';
+import ParticipantsList from '../../components/meeting/ParticipantsList';
+import WaitingRoomRequests from '../../components/meeting/WaitingRoomRequests';
+import type { ParticipantMeta, ChatMessage, ProducerInfo, WaitingEntry } from '../../types';
+import ReactionsOverlay from '../../components/meeting/Reactionsoverlay';
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
+type Phase = 'connecting' | 'waiting' | 'joined' | 'ended' | 'error';
 
-interface TransportData {
-  id: string;
-  iceParameters: mediasoupClient.types.IceParameters;
-  iceCandidates: mediasoupClient.types.IceCandidate[];
-  dtlsParameters: mediasoupClient.types.DtlsParameters;
-  iceServers?: RTCIceServer[];
-  error?: string;
-}
-
-interface ConsumerData {
-  id: string;
-  producerId: string;
-  kind: mediasoupClient.types.MediaKind;
-  rtpParameters: mediasoupClient.types.RtpParameters;
-  appData?: any;
-  error?: string;
-}
-
-interface NewProducerData {
-  producerId: string;
-  kind: mediasoupClient.types.MediaKind;
-  appData?: Record<string, any>;
-}
-
-const MeetingRoom: React.FC = () => {
-  const { user } = useAuth();
-  const tempUser = useAuthStore((s) => s.tempUser);
-  const pps = useMeetingStore((s) => s.participants);
-  const title = useMeetingStore((s) => s.title);
-  const setPPs = useMeetingStore((s) => s.setParticipants);
-  const setCallbacks = useNewMeetingStore((s) => s.setCallbacks);
-  const receiveMessage = useNewMeetingStore((s) => s.receiveMessage);
-  const clearMeetingSettings = useNewMeetingStore((s) => s.clearMeeting);
-  const setSendChatCallback = useNewMeetingStore((s) => s.setSendChatCallback);
-  const setTempUser = useAuthStore((s) => s.setTempUser);
-  const unreadMessages = useNewMeetingStore((s) => s.unreadMessageCount);
-  const setChatOpen = useNewMeetingStore((s) => s.setChatOpen);
-  const isChatOpen = useNewMeetingStore((s) => s.isChatOpen);
-
-  const {isAudioMuted, isVideoEnabled} = useNewMeetingStore()
-
-  console.log({pps, isAudioMuted, isVideoEnabled, isChatOpen})
+export default function MeetingRoom() {
   const { roomId } = useParams<{ roomId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isTablet = useMediaQuery(theme.breakpoints.down('md'));
 
-  const socketRef = useRef<typeof Socket | null>(null);
-  const deviceRef = useRef<mediasoupClient.Device | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const screenStreamRef = useRef<MediaStream | null>(null);
-  const audioProducerRef = useRef<mediasoupClient.types.Producer | null>(null);
-  const videoProducerRef = useRef<mediasoupClient.types.Producer | null>(null);
-  const consumerMapRef = useRef<Map<string, mediasoupClient.types.Consumer>>(new Map());
-  const peerProducersRef = useRef<Map<string, Set<string>>>(new Map());
-  const didInitRef = useRef(false);
+  const { user } = useAuthStore();
+  const store = useMeetingStore();
+  const isChatOpen = useMeetingStore((s) => s.isChatOpen)
 
-  const [streams, setStreams] = useState<{ [peerId: string]: MediaStream }>({});
-  const [elapsedTime, setElapsedTime] = useState(0);
-  const [connectError, setConnectError] = useState('');
+  const socketRef = useRef(getSocket());
+  const [phase, setPhase] = useState<Phase>('connecting');
+  const [errorMsg, setErrorMsg] = useState('');
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioLevelTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const videoProducerRef = useRef<string | null>(null);
+  const audioProducerRef = useRef<string | null>(null);
+  const screenProducerRef = useRef<string | null>(null);
+  const [booted, setBooted] = useState(false);
+  const localIdentifier = useRef('')
 
+  const ms = useMediasoup(socketRef);
+  useTimeSync(socketRef.current);
+
+  // ── Semantic theme aliases ────────────────────────────────────────────────
+  const primary   = theme.palette.primary.main;
+  const secondary = theme.palette.secondary.main;
+  const warning   = theme.palette.warning.main;
+  const error     = theme.palette.error.main;
+  const bgDefault = theme.palette.background.default;
+  const bgPaper   = theme.palette.background.paper;
+  const textPrimary   = theme.palette.text.primary;
+  const textSecondary = theme.palette.text.secondary;
+  const divider   = theme.palette.divider;
+  const isDark    = theme.palette.mode === 'dark';
+
+  // ── Boot: connect socket & join room ──────────────────────────────────────
   useEffect(() => {
-    const id = setInterval(() => setElapsedTime((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
+    let mounted = true;
+    if (roomId && booted) return;
+    setBooted(true);
 
-  useEffect(() => {
-    if (!tempUser) {
-      const id = user?.id || sessionStorage.getItem('guestUserId');
-      if (!id) return;
-      setTempUser({
-        id,
-        name:
-          user?.name ||
-          (user as any)?.email?.split('@')[0] ||
-          sessionStorage.getItem('guestFullname') ||
-          'Guest',
-      } as User);
-    }
-  }, [user]);
+    async function boot() {
+      if (!roomId) return;
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        const displayName = localStorage.getItem('displayName')
+        const socket = await connectSocket(roomId, token??undefined, displayName??undefined);
+        socketRef.current = socket;
 
-  const formatElapsedTime = () => {
-    const h = Math.floor(elapsedTime / 3600);
-    const m = Math.floor((elapsedTime % 3600) / 60);
-    const s = elapsedTime % 60;
-    return `${h > 0 ? `${h}:` : ''}${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  };
-
-  const leaveMeeting = useCallback(() => {
-    setPPs([]);
-    clearMeetingSettings();
-    navigate('/');
-  }, [navigate, setPPs, clearMeetingSettings]);
-
-  const upsertTrack = useCallback((peerId: string, track: MediaStreamTrack) => {
-    setStreams((prev) => {
-      const existing = prev[peerId];
-      if (existing) {
-        if (track.kind === 'video') {
-          existing.getVideoTracks().forEach((t) => { existing.removeTrack(t); t.stop(); });
-        } else {
-          existing.getAudioTracks().forEach((t) => { existing.removeTrack(t); t.stop(); });
-        }
-        existing.addTrack(track);
-        return { ...prev, [peerId]: existing };
-      }
-      const stream = new MediaStream([track]);
-      return { ...prev, [peerId]: stream };
-    });
-  }, []);
-
-  const handleToggleAudio = useCallback(
-    (enabled: boolean) => {
-      const p = audioProducerRef.current;
-      if (!p) return;
-      if (!enabled) {
-        p.pause();
-        socketRef.current?.emit('pauseProducer', { roomId, producerId: p.id });
-      } else {
-        p.resume();
-        socketRef.current?.emit('resumeProducer', { roomId, producerId: p.id });
-      }
-    },
-    [roomId]
-  );
-
-  const handleToggleVideo = useCallback(
-    (enabled: boolean) => {
-      const p = videoProducerRef.current;
-      if (!p) return;
-      if (!enabled) {
-        p.pause();
-        socketRef.current?.emit('pauseProducer', { roomId, producerId: p.id });
-      } else {
-        p.resume();
-        socketRef.current?.emit('resumeProducer', { roomId, producerId: p.id });
-      }
-    },
-    [roomId]
-  );
-
-  const handleToggleScreenShare = useCallback(
-    async (sharing: boolean) => {
-      const p = videoProducerRef.current;
-      if (!p || !tempUser) return;
-
-      const restoreCam = async () => {
-        const screenStream = screenStreamRef.current;
-        screenStreamRef.current = null;
-        screenStream?.getTracks().forEach((t) => t.stop());
-        const freshStream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const freshTrack = freshStream.getVideoTracks()[0];
-        if (localStreamRef.current) {
-          localStreamRef.current.getVideoTracks().forEach((t) => {
-            localStreamRef.current!.removeTrack(t);
-            t.stop();
-          });
-          localStreamRef.current.addTrack(freshTrack);
-        }
-        if (videoProducerRef.current) await videoProducerRef.current.replaceTrack({ track: freshTrack });
-        upsertTrack(tempUser.id, freshTrack);
-      };
-
-      if (sharing) {
-        try {
-          const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-          screenStreamRef.current = screenStream;
-          const screenTrack = screenStream.getVideoTracks()[0];
-          screenTrack.onended = async () => {
-            useNewMeetingStore.getState().setScreenSharing(false);
-            await restoreCam();
-          };
-          await p.replaceTrack({ track: screenTrack });
-          upsertTrack(tempUser.id, screenTrack);
-        } catch (err) {
-          console.error('Screen share error:', err);
-          useNewMeetingStore.getState().setScreenSharing(false);
-        }
-      } else {
-        await restoreCam();
-      }
-    },
-    [tempUser, upsertTrack]
-  );
-
-  useEffect(() => {
-    setCallbacks({
-      onToggleAudio: handleToggleAudio,
-      onToggleVideo: handleToggleVideo,
-      onToggleScreenShare: handleToggleScreenShare,
-    });
-  }, [handleToggleAudio, handleToggleVideo, handleToggleScreenShare, setCallbacks]);
-
-  const start = useCallback(async () => {
-    if (!socketRef.current || !deviceRef.current || !tempUser) return;
-
-    const socket = socketRef.current;
-    const device = deviceRef.current;
-    const myPeerId = tempUser.id;
-
-    socket.removeEventListener('newProducer');
-    socket.removeEventListener('peerLeft');
-    socket.removeEventListener('peerJoined');
-    socket.removeEventListener('consumerClosed');
-    socket.removeEventListener('producerClosed');
-    socket.removeEventListener('chatMessage');
-
-    let recvTransport: mediasoupClient.types.Transport | null = null;
-    let recvTransportId: string | null = null;
-    let recvTransportCreating: Promise<void> | null = null;
-
-    function ensureRecvTransport(): Promise<void> {
-      if (recvTransport) return Promise.resolve();
-      if (recvTransportCreating) return recvTransportCreating;
-      recvTransportCreating = new Promise<void>((resolve, reject) => {
-        socket.emit('createWebRtcTransport', { roomId, direction: 'recv' }, (params: TransportData) => {
-          if (params.error) return reject(new Error(params.error));
-          recvTransportId = params.id;
-          const t = device.createRecvTransport({
-            id: params.id,
-            iceParameters: params.iceParameters,
-            iceCandidates: params.iceCandidates,
-            dtlsParameters: params.dtlsParameters,
-            iceServers: params.iceServers ?? [],
-          });
-          t.on('connect', ({ dtlsParameters: dp }, cb, errback) => {
-            socket.emit('connectTransport', { roomId, transportId: params.id, dtlsParameters: dp },
-              (res: any) => (res.error ? errback(new Error(res.error)) : cb()));
-          });
-          recvTransport = t;
-          resolve();
+        await new Promise<void>((res, rej) => {
+          if (socket.connected) return res();
+          socket.once('connect', res);
+          socket.once('connect_error', (e) => rej(e));
+          setTimeout(() => rej(new Error('Connection timeout')), 10000);
         });
-      });
-      return recvTransportCreating;
-    }
 
-    async function consume(producerId: string, kind: string, peerId: string): Promise<void> {
-      if (!recvTransport || !recvTransportId) return;
-      return new Promise<void>((resolve) => {
-        socket.emit('consume', {
-          roomId,
-          consumerTransportId: recvTransportId,
-          producerId,
-          clientRtpCapabilities: device.rtpCapabilities,
-        }, async (params: ConsumerData) => {
-          if (params.error) return resolve();
-          const consumer = await recvTransport!.consume({
-            id: params.id,
-            producerId: params.producerId,
-            kind: params.kind,
-            rtpParameters: params.rtpParameters,
-          });
-          consumerMapRef.current.set(producerId, consumer);
-          if (!peerProducersRef.current.has(peerId)) peerProducersRef.current.set(peerId, new Set());
-          peerProducersRef.current.get(peerId)!.add(producerId);
-          socket.emit('consumerResume', { roomId, consumerId: consumer.id }, async (res: any) => {
-            if (res.error) return resolve();
-            await consumer.resume();
-            if (kind === 'video') {
-              setTimeout(() => socket.emit('requestKeyFrame', { roomId, consumerId: consumer.id }), 150);
-            }
-            upsertTrack(peerId, consumer.track);
-            consumer.track.onunmute = () => upsertTrack(peerId, consumer.track);
-            resolve();
-          });
+        if (!mounted) return;
+
+        const password = searchParams.get('pw') || undefined;
+
+        socket.emit('room:join', { roomId, password }, async (res: {
+          id: string
+          error?: string;
+          waiting?: boolean;
+          room?: Parameters<typeof store.setRoom>[0];
+          participants?: ParticipantMeta[];
+          chatHistory?: ChatMessage[];
+          producers?: ProducerInfo[];
+          rtpCapabilities?: Parameters<typeof ms.loadDevice>[0];
+        }) => {
+          if (!mounted) return;
+
+          if (res.error === 'ROOM_NOT_FOUND') { setErrorMsg('Room not found'); return setPhase('error'); }
+          if (res.error === 'ROOM_FULL') { setErrorMsg('Room is full'); return setPhase('error'); }
+          if (res.error === 'WRONG_PASSWORD') { setErrorMsg('Wrong password'); return setPhase('error'); }
+          if (res.error) { setErrorMsg(res.error); return setPhase('error'); }
+
+          if (res.waiting) {
+            setPhase('waiting');
+            socket.once('waiting:admitted', () => { if (mounted) bootMedia(socket, res); });
+            socket.once('waiting:denied', () => {
+              if (mounted) { setErrorMsg('Host denied your request'); setPhase('error'); }
+            });
+            return;
+          }
+
+          localIdentifier.current = res.id
+
+          await bootMedia(socket, res);
         });
-      });
+      } catch {
+        if (!mounted) return;
+        setErrorMsg('Failed to connect to server');
+        setPhase('error');
+      }
     }
 
-    socket.on('newProducer', async ({ producerId, kind, appData: ad }: NewProducerData) => {
-      const peerId: string = ad?.peerId ?? 'unknown';
-      if (peerId === myPeerId) return;
-      await ensureRecvTransport();
-      await consume(producerId, kind, peerId);
-    });
+    async function bootMedia(
+      socket: ReturnType<typeof getSocket>,
+      joinRes: {
+        room?: Parameters<typeof store.setRoom>[0];
+        participants?: ParticipantMeta[];
+        chatHistory?: ChatMessage[];
+        producers?: ProducerInfo[];
+        rtpCapabilities?: Parameters<typeof ms.loadDevice>[0];
+      },
+    ) {
+      if (!localIdentifier.current) {
+        toast.error('INVALID_IDENTIFIER');
+        return;
+      }
 
-    socket.on('peerJoined', ({ peerId, peerUserName }: { peerId: string; peerUserName: string }) => {
-      if (peerId) setPPs((prev) => [...prev, { id: peerId, name: peerUserName ?? 'Guest' }]);
-    });
+      store.setRoom(joinRes.room || null);
+      store.setParticipants(joinRes.participants || []);
 
-    socket.on('peerLeft', ({ peerId, producerIds }: { peerId: string; producerIds: string[] }) => {
-      if (peerId === myPeerId) return;
-      const tracked = peerProducersRef.current.get(peerId);
-      const toClose = tracked ? [...tracked] : (producerIds ?? []);
-      toClose.forEach((pid) => { consumerMapRef.current.get(pid)?.close(); consumerMapRef.current.delete(pid); });
-      peerProducersRef.current.delete(peerId);
-      setStreams((prev) => { const next = { ...prev }; delete next[peerId]; return next; });
-      setPPs((prev: Participant[]) => prev.filter((p: Participant) => p.id !== peerId));
-    });
+      // Pre-populate remote stream entries for existing participants
+      // so consumeProducer can merge role/isHost into them
+      for (const p of joinRes.participants || []) {
+        if (p.socketId !== socket.id) {
+          store.setRemoteStream(p.socketId, {
+            socketId: p.socketId,
+            userId: p.userId,
+            displayName: p.displayName,
+            photoURL: p.photoURL,
+            role: p.role,
+            isHost: p.isHost,
+            videoStream: null,
+            audioStream: null,
+            screenStream: null,
+            audioLevel: 0,
+          });
+        }
+      }
 
-    socket.on('consumerClosed', ({ producerId }: { producerId: string }) => {
-      consumerMapRef.current.get(producerId)?.close();
-      consumerMapRef.current.delete(producerId);
-    });
+      store.setMessages(joinRes.chatHistory || []);
+      store.setMySocketId(socket.id!);
 
-    socket.on('producerClosed', ({ producerId }: { producerId: string }) => {
-      consumerMapRef.current.get(producerId)?.close();
-      consumerMapRef.current.delete(producerId);
-    });
+      const myParticipant = joinRes.participants?.find((p) => p.userId === localIdentifier.current);
+      store.setMyRole(myParticipant?.role || 'participant');
 
-    socket.on('chatMessage', (msg: ChatMessage) => receiveMessage(msg));
+      const canProduce = myParticipant?.role !== 'viewer';
 
-    setSendChatCallback((text: string) => {
-      if (!text.trim()) return;
-      const msg: ChatMessage = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        senderId: myPeerId,
-        senderName: tempUser.name,
-        content: text.trim(),
-        timestamp: Date.now(),
-        isPrivate: false,
-      };
-      receiveMessage(msg);
-      socket.emit('sendMessage', { roomId, message: msg });
-    });
+      if (joinRes.rtpCapabilities) await ms.loadDevice(joinRes.rtpCapabilities);
+      if (canProduce) await ms.createSendTransport();
+      await ms.createRecvTransport();
+      if (canProduce) await startLocalMedia(socket);
 
-    // Local media
+      if (joinRes.producers) {
+        for (const p of joinRes.producers) {
+          if (p.socketId !== socket.id) {
+            const participant = joinRes.participants?.find(part => part.socketId === p.socketId);
+            await ms.consumeProducer(p, participant);
+          }
+        }
+      }
+
+      registerSocketListeners(socket);
+      heartbeatRef.current = setInterval(() => { socket.emit('heartbeat'); }, 15000);
+      setPhase('joined');
+    }
+
+    boot();
+    return () => { mounted = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
+
+  // ── Start local media ─────────────────────────────────────────────────────
+  async function startLocalMedia(socket: ReturnType<typeof getSocket>) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
         video: { width: 1280, height: 720, frameRate: 30 },
-        audio: { echoCancellation: true, noiseSuppression: true },
       });
-      localStreamRef.current = stream;
-      setStreams((prev) => ({ ...prev, [myPeerId]: stream }));
-    } catch (err) {
-      console.error('[start] getUserMedia error:', err);
-    }
+      store.setLocalStream(stream);
+      store.setMicOn(true);
+      store.setCameraOn(true);
 
-    // Send transport + produce
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        const producer = await ms.produceTrack(audioTrack, { kind: 'audio' });
+        if (producer) audioProducerRef.current = producer.id;
+        startAudioLevel(stream, socket);
+      }
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        const producer = await ms.produceTrack(videoTrack, { kind: 'video' });
+        if (producer) videoProducerRef.current = producer.id;
+      }
+    } catch {
+      toast.error('Could not access camera/microphone');
+    }
+  }
+
+  // ── Audio level analysis ──────────────────────────────────────────────────
+  function startAudioLevel(stream: MediaStream, socket: ReturnType<typeof getSocket>) {
     try {
-      await new Promise<void>((resolveSendTransport) => {
-        socket.emit('createWebRtcTransport', { roomId, direction: 'send' }, async (params: TransportData) => {
-          if (params.error) return resolveSendTransport();
-          const sendTransportId = params.id;
-          const t = device.createSendTransport({
-            id: params.id,
-            iceParameters: params.iceParameters,
-            iceCandidates: params.iceCandidates,
-            dtlsParameters: params.dtlsParameters,
-            iceServers: params.iceServers ?? [],
-          });
-          t.on('connect', ({ dtlsParameters: dp }, cb, errback) => {
-            socket.emit('connectTransport', { roomId, transportId: sendTransportId, dtlsParameters: dp },
-              (res: any) => (res.error ? errback(new Error(res.error)) : cb()));
-          });
-          t.on('produce', ({ kind, rtpParameters, appData: ad }, cb, errback) => {
-            socket.emit('produce', {
-              roomId, transportId: sendTransportId, kind, rtpParameters,
-              appData: { ...ad, peerId: myPeerId },
-            }, (res: any) => (res.error ? errback(new Error(res.error)) : cb({ id: res.id })));
-          });
-          if (localStreamRef.current) {
-            const audioTrack = localStreamRef.current.getAudioTracks()[0];
-            const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      const ctx = new AudioContext();
+      audioContextRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      const buf = new Uint8Array(analyser.frequencyBinCount);
 
-            // if (audioTrack) {
-            //   audioTrack.enabled = !isAudioMuted
-            // }
-            // if (videoTrack) {
-            //   videoTrack.enabled = isVideoEnabled
-            // }
-            if (audioTrack) {
-              try { 
-                audioProducerRef.current = await t.produce({ track: audioTrack }); 
-                if (isAudioMuted) {
-                  audioProducerRef.current.pause();
-                  socket.emit('pauseProducer', {
-                    roomId,
-                    producerId: audioProducerRef.current.id
-                  })
-                }
-              }
-              catch (e) { console.error('[produce] audio failed:', e); }
-            }
-            if (videoTrack) {
-              try {
-                videoProducerRef.current = await t.produce({
-                  track: videoTrack,
-                  encodings: [
-                    { maxBitrate: 100_000, scaleResolutionDownBy: 4 },
-                    { maxBitrate: 300_000, scaleResolutionDownBy: 2 },
-                    { maxBitrate: 900_000 },
-                  ],
-                  codecOptions: { videoGoogleStartBitrate: 1000 },
-                });
+      audioLevelTimerRef.current = setInterval(() => {
+        analyser.getByteFrequencyData(buf);
+        const avg = buf.reduce((s, v) => s + v, 0) / buf.length;
+        const level = Math.min(100, Math.round(avg * 2.5));
+        socket.emit('audio:level', { level });
 
-                if (!isVideoEnabled) {
-                  videoProducerRef.current.pause();
-                  socket.emit('pauseProducer', {
-                    roomId,
-                    producerId: videoProducerRef.current.id
-                  })
-                }
-              } catch (e) { console.error('[produce] video failed:', e); }
-            }
-          }
-          resolveSendTransport();
-        });
+        const mySocketId = useMeetingStore.getState().mySocketId;
+        if (mySocketId && level > 10) useMeetingStore.getState().setActiveSpeaker(mySocketId);
+      }, 200);
+    } catch {}
+  }
+
+  // ── Socket event listeners ────────────────────────────────────────────────
+  function registerSocketListeners(socket: ReturnType<typeof getSocket>) {
+    socket.on('participant:joined', (p: ParticipantMeta) => {
+      store.addParticipant(p);
+      store.setRemoteStream(p.socketId, {
+        socketId: p.socketId, userId: p.userId,
+        displayName: p.displayName, photoURL: p.photoURL,
+        role: p.role, isHost: p.isHost,
+        videoStream: null, audioStream: null, screenStream: null, audioLevel: 0,
       });
+      toast(`${p.displayName} joined`, { icon: '👋' });
+    });
 
-      socket.emit('getProducers', { roomId, clientRtpCapabilities: device.rtpCapabilities },
-        (res: any) => { if (res?.error) console.error('[getProducers] error:', res.error); });
-    } catch (error) {
-      console.error('[start] fatal error:', error);
-      leaveMeeting();
+    socket.on('participant:left', ({ socketId, displayName }: { socketId: string; displayName: string }) => {
+      store.removeParticipant(socketId);
+      store.removeRemoteStream(socketId);
+      toast(`${displayName} left`);
+    });
+
+    socket.on('new:producer', async (info: ProducerInfo) => {
+      if (info.socketId !== socket.id) {
+        const participant = useMeetingStore.getState().participants.find(p => p.socketId === info.socketId);
+        await ms.consumeProducer(info, participant);
+      }
+    });
+
+    socket.on('producer:paused', ({ producerId, socketId }: { producerId: string; socketId: string }) => {
+      const { remoteStreams } = useMeetingStore.getState();
+      const remoteStream = remoteStreams.get(socketId);
+      if (!remoteStream) return;
+
+      const consumer = [...ms.consumersRef.current.values()].find(c => c.producerId === producerId);
+      if (!consumer) return;
+
+      const isVideo = remoteStream.videoStream?.getTracks().some(t => t.id === consumer.track.id);
+      store.setRemoteStream(socketId, isVideo ? { videoStream: null } : { audioStream: null });
+    });
+
+    socket.on('producer:resumed', async ({ producerId, socketId }: { producerId: string; socketId: string }) => {
+      const consumer = [...ms.consumersRef.current.values()].find(c => c.producerId === producerId);
+      if (consumer) {
+        await consumer.resume();
+        const field = consumer.kind === 'video' ? 'videoStream' : 'audioStream';
+        store.setRemoteStream(socketId, { [field]: new MediaStream([consumer.track]) });
+      }
+    });
+
+    socket.on('producer:closed', ({ socketId }: { socketId: string }) => {
+      store.removeRemoteStream(socketId);
+    });
+
+    socket.on('socket:disconnected', ({ socketId }: { socketId: string }) => {
+      store.removeParticipant(socketId);
+      store.removeRemoteStream(socketId);
+    });
+
+    socket.on('audio:level', ({ socketId, level }: { socketId: string; userId: string; level: number }) => {
+      store.setRemoteStream(socketId, { audioLevel: level });
+      if (level > 20) store.setActiveSpeaker(socketId);
+    });
+
+    socket.on('chat:message', (msg: ChatMessage) => {
+      store.addMessage(msg);
+      if (!useMeetingStore.getState().isChatOpen) {
+        store.incrementUnread();
+      }
+    });
+
+    socket.on('chat:typing', ({ socketId, displayName, isTyping }: { socketId: string; userId: string; displayName: string; isTyping: boolean }) => {
+      store.setTyping(socketId, displayName, isTyping);
+    });
+
+    socket.on('waiting:request', (entry: WaitingEntry) => {
+      store.addWaiting(entry);
+      toast(`${entry.displayName} is waiting`, { icon: '🚪', duration: 8000 });
+    });
+
+    socket.on('room:locked', ({ locked, by }: { locked: boolean; by: string }) => {
+      const { room } = useMeetingStore.getState();
+      if (room) store.setRoom({ ...room, isLocked: locked });
+      toast(locked ? `Room locked by ${by}` : `Room unlocked by ${by}`, { icon: locked ? '🔒' : '🔓' });
+    });
+
+    socket.on('room:ended', () => {
+      setPhase('ended');
+      toast.error('Meeting ended by host');
+      setTimeout(() => navigate('/'), 2000);
+    });
+
+    socket.on('room:kicked', () => {
+      setPhase('ended');
+      toast.error('You were removed from the meeting');
+      setTimeout(() => navigate('/'), 2000);
+    });
+
+    socket.on('host:mute-all', () => { handleMuteMic(true); toast('You were muted by the host', { icon: '🔇' }); });
+    socket.on('host:mute-you', () => { handleMuteMic(true); toast('You were muted by the host', { icon: '🔇' }); });
+    socket.on('host:disable-all-cameras', () => { handleMuteCamera(true); toast('Your camera was disabled by the host', { icon: '📷' }); });
+  }
+
+  // ── Media controls ────────────────────────────────────────────────────────
+  function handleMuteMic(force?: boolean) {
+    const newMuted = force !== undefined ? force : store.isMicOn;
+    const track = store.localStream?.getAudioTracks()[0];
+    if (track) track.enabled = !newMuted;
+    store.setMicOn(!newMuted);
+    if (audioProducerRef.current) {
+      const producer = ms.producersRef.current.get(audioProducerRef.current);
+      if (producer) {
+        newMuted ? producer.pause() : producer.resume();
+        socketRef.current?.emit(newMuted ? 'producer:pause' : 'producer:resume', { producerId: audioProducerRef.current }, () => {});
+      }
     }
-  }, [roomId, tempUser, upsertTrack, leaveMeeting]);
+  }
 
-  const startRef = useRef(start);
-  useEffect(() => { startRef.current = start; }, [start]);
+  function handleMuteCamera(force?: boolean) {
+    const newOff = force !== undefined ? force : store.isCameraOn;
+    const track = store.localStream?.getVideoTracks()[0];
+    if (track) track.enabled = !newOff;
+    store.setCameraOn(!newOff);
+    if (videoProducerRef.current) {
+      const producer = ms.producersRef.current.get(videoProducerRef.current);
+      if (producer) {
+        newOff ? producer.pause() : producer.resume();
+        socketRef.current?.emit(newOff ? 'producer:pause' : 'producer:resume', { producerId: videoProducerRef.current }, () => {});
+      }
+    }
+  }
+
+  async function handleToggleScreen() {
+    if (store.isScreenSharing) {
+      const track = store.localScreenStream?.getTracks()[0];
+      track?.stop();
+      store.setLocalScreenStream(null);
+      store.setScreenSharing(false);
+      if (screenProducerRef.current) {
+        socketRef.current?.emit('producer:close', { producerId: screenProducerRef.current });
+        ms.producersRef.current.get(screenProducerRef.current)?.close();
+        ms.producersRef.current.delete(screenProducerRef.current);
+        screenProducerRef.current = null;
+      }
+      try {
+        const camStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+        const camTrack = camStream.getVideoTracks()[0];
+        store.localStream?.getVideoTracks().forEach(t => { store.localStream!.removeTrack(t); t.stop(); });
+        store.localStream?.addTrack(camTrack);
+        if (!videoProducerRef.current) return;
+        const producer = ms.producersRef.current.get(videoProducerRef.current);
+        if (producer) await producer.replaceTrack({ track: camTrack });
+      } catch { toast.error('Could not restore camera'); }
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        store.setLocalScreenStream(stream);
+        store.setScreenSharing(true);
+        const track = stream.getVideoTracks()[0];
+        if (!videoProducerRef.current) return;
+        const producer = ms.producersRef.current.get(videoProducerRef.current);
+        await producer?.replaceTrack({ track });
+        track.onended = () => handleToggleScreen();
+      } catch { toast.error('Screen share cancelled'); }
+    }
+  }
+
+  function handleReaction(emoji: string) { socketRef.current?.emit('reaction:send', { emoji }); }
+
+  function handleToggleLayout() {
+    const modes: Array<'grid' | 'spotlight'> = ['grid', 'spotlight'];
+    const idx = modes.indexOf(store.layoutMode as 'grid' | 'spotlight');
+    store.setLayoutMode(modes[(idx + 1) % modes.length]);
+  }
+
+  function handlePinToggle(socketId: string) {
+    store.setPinnedSocketId(store.pinnedSocketId === socketId ? null : socketId);
+  }
+
+  function handleMuteParticipant(socketId: string) { socketRef.current?.emit('host:mute-participant', { socketId }); }
+  function handleKickParticipant(socketId: string) { socketRef.current?.emit('host:kick', { socketId }, () => {}); }
+  function handleToggleLock() {
+    const locked = !store.room?.isLocked;
+    socketRef.current?.emit('room:lock', { locked }, () => {});
+  }
+  function handleMuteAll() { socketRef.current?.emit('host:mute-all'); }
+
+  function handleLeave() {
+    socketRef.current?.emit('room:leave');
+    cleanup();
+    navigate('/');
+  }
+
+  function handleEndRoom() {
+    socketRef.current?.emit('room:end', () => {});
+    cleanup();
+    navigate('/');
+  }
+
+  function cleanup() {
+    if (audioLevelTimerRef.current) clearInterval(audioLevelTimerRef.current);
+    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+  
+  // Guard against double-close
+    if (audioContextRef.current?.state !== 'closed') {
+      audioContextRef.current?.close().catch(() => {});
+    }
+    audioContextRef.current = null;
+  
+    store.localStream?.getTracks().forEach((t) => t.stop());
+    store.localScreenStream?.getTracks().forEach((t) => t.stop());
+    ms.closeAll();
+    store.reset();
+  }
 
   useEffect(() => {
-    if (!roomId || !tempUser) return;
-    if (didInitRef.current) return;
-    didInitRef.current = true;
+    return () => { cleanup(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    let cancelled = false;
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'm' || e.key === 'M') handleMuteMic();
+      if (e.key === 'v' || e.key === 'V') handleMuteCamera();
+      if (e.key === 'c' || e.key === 'C') store.setChatOpen(!isChatOpen);
+      if (e.key === 'p' || e.key === 'P') store.setParticipantsOpen(!store.isParticipantsOpen);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
-    (async () => {
-      try {
-        const token = auth.currentUser
-          ? await auth.currentUser.getIdToken(true).catch(() => '')
-          : '';
+  const isHost = store.room?.hostId === user?.uid;
+  const canProduce = store.myRole !== 'viewer';
 
-        if (cancelled) return;
+  // ── Loading / gate phases ─────────────────────────────────────────────────
+  const gateBackground = isDark
+    ? `radial-gradient(ellipse 70% 60% at 50% 0%, ${alpha(primary, 0.12)} 0%, transparent 60%)`
+    : `radial-gradient(ellipse 70% 60% at 50% 0%, ${alpha(primary, 0.06)} 0%, transparent 60%)`;
 
-        const socket = io(SERVER_URL, {
-          reconnection: true,
-          reconnectionAttempts: 5,
-          auth: { token },
-          withCredentials: true,
-        } as any);
-        socketRef.current = socket;
-        deviceRef.current = new mediasoupClient.Device();
+  if (phase === 'connecting') {
+    return (
+      <Box sx={{
+        height: '100dvh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        background: bgDefault, backgroundImage: gateBackground, gap: 2,
+      }}>
+        <CircularProgress sx={{ color: primary }} size={36} />
+        <Typography sx={{ color: textSecondary, fontSize: '0.9rem' }}>Connecting to room…</Typography>
+      </Box>
+    );
+  }
 
-        socket.on('connect', () => {
-          console.log('[socket] connected id=', socket.id);
-          socket.emit(
-            'joinRoom',
-            { roomId, rtpCapabilities: null, appUserId: tempUser.id, appUserName: tempUser.name },
-            async (res: { rtpCapabilities: any; peers: any; error: any }) => {
-              try {
-                if (res.error) {
-                  setConnectError(res.error);
-                  setTimeout(() => leaveMeeting(), 2500);
-                  return;
-                }
-                setPPs(res.peers ?? []);
-                await deviceRef.current!.load({ routerRtpCapabilities: res.rtpCapabilities });
-                await startRef.current();
-              } catch (e: any) {
-                console.error('[device/start] error:', e);
-                setConnectError(e.message || 'Connection failed');
-                setTimeout(() => leaveMeeting(), 2500);
-              }
-            }
-          );
-        });
+  if (phase === 'waiting') {
+    return (
+      <Box sx={{
+        height: '100dvh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        background: bgDefault, backgroundImage: gateBackground, gap: 3,
+        px: 3,
+      }}>
+        <Box sx={{
+          width: 64, height: 64, borderRadius: '16px',
+          background: alpha(warning, 0.15),
+          border: `1px solid ${alpha(warning, 0.3)}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Lock sx={{ fontSize: 28, color: warning }} />
+        </Box>
+        <Stack alignItems="center" spacing={1}>
+          <Typography variant="h5" sx={{ fontFamily: '"Sora", sans-serif', fontWeight: 700, color: textPrimary, textAlign: 'center' }}>
+            Waiting to be admitted
+          </Typography>
+          <Typography variant="body2" sx={{ color: textSecondary }}>
+            The host will let you in shortly
+          </Typography>
+        </Stack>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {[0, 1, 2].map((i) => (
+            <Box key={i} sx={{
+              width: 8, height: 8, borderRadius: '50%', background: primary,
+              animation: `bounce 1.2s ${i * 0.2}s infinite`,
+            }} />
+          ))}
+        </Box>
+        <Button variant="outlined" onClick={() => navigate('/')} sx={{ mt: 1 }}>
+          Leave queue
+        </Button>
+        <style>{`@keyframes bounce { 0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)} }`}</style>
+      </Box>
+    );
+  }
 
-        socket.on('connect_error', (e: Error) => {
-          console.error('[socket] connect_error:', e.message);
-          setConnectError('Failed to connect to server. Returning to home…');
-          setTimeout(() => leaveMeeting(), 2500);
-        });
-      } catch (error) {
-        console.error('[socket bootstrap]', error);
-      }
-    })();
+  if (phase === 'ended' || phase === 'error') {
+    return (
+      <Box sx={{
+        height: '100dvh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        background: bgDefault, backgroundImage: gateBackground, gap: 3,
+        px: 3, textAlign: 'center',
+      }}>
+        <Box sx={{
+          width: 64, height: 64, borderRadius: '16px',
+          background: alpha(error, 0.12),
+          border: `1px solid ${alpha(error, 0.25)}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 28,
+        }}>
+          {phase === 'ended' ? '👋' : '⚠️'}
+        </Box>
+        <Stack alignItems="center" spacing={1}>
+          <Typography variant="h5" sx={{ fontFamily: '"Sora", sans-serif', fontWeight: 700, color: textPrimary }}>
+            {phase === 'ended' ? 'Meeting ended' : 'Cannot join'}
+          </Typography>
+          <Typography variant="body2" sx={{ color: textSecondary }}>
+            {errorMsg || 'The meeting has ended'}
+          </Typography>
+        </Stack>
+        <Button variant="contained" onClick={() => navigate('/')} startIcon={<VideoCall />}>
+          Back to home
+        </Button>
+      </Box>
+    );
+  }
 
-    return () => {
-      cancelled = true;
-      didInitRef.current = false;
-      socketRef.current?.disconnect();
-      socketRef.current = null;
-      deviceRef.current = null;
-      localStreamRef.current?.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
-    };
-  }, [roomId, tempUser]);
-
-  const screenShareParticipant = useMemo(() => {
-    return pps?.find((p) => {
-      const stream = streams[p.id];
-      if (!stream) return false;
-      const track = stream.getVideoTracks()[0];
-      if (!track) return false;
-      return !!track.getSettings().displaySurface;
-    });
-  }, [pps, streams]);
+  // ── Sidepanel logic on mobile: only one open at a time, slides over video ─
+  const hasSidePanel = isChatOpen || store.isParticipantsOpen;
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden', bgcolor: '#0a0a0f', flexDirection: 'column' }}>
-      <AppBar
-        position="static"
-        elevation={0}
-        sx={{ bgcolor: 'rgba(15,15,25,0.95)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0 }}
-      >
-        <Toolbar sx={{ gap: 1 }}>
-          <IconButton edge="start" onClick={() => leaveMeeting()} sx={{ color: '#94a3b8', '&:hover': { color: '#fff' } }}>
-            <ArrowLeft size={20} />
-          </IconButton>
-          <Typography
-            variant="h6"
-            sx={{ flexGrow: 1, fontFamily: "'Sora', sans-serif", fontWeight: 600, fontSize: '1rem', color: '#e2e8f0', letterSpacing: '-0.01em' }}
-          >
-            {title || 'Meeting'}
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, bgcolor: 'rgba(255,255,255,0.05)', borderRadius: 2, px: 1.5, py: 0.5 }}>
-            <Clock size={14} color="#6ee7b7" />
-            <Typography variant="body2" sx={{ color: '#6ee7b7', fontFamily: 'monospace', fontSize: '0.8rem', letterSpacing: '0.05em' }}>
-              {formatElapsedTime()}
+    <Box sx={{
+      height: '100dvh', display: 'flex', flexDirection: 'column',
+      background: bgDefault, overflow: 'hidden',
+    }}>
+      {/* ── Top bar ──────────────────────────────────────────────────────── */}
+      <Box sx={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        px: { xs: 1.5, sm: 2.5 }, py: { xs: 1, sm: 1.2 },
+        background: isDark ? 'rgba(8,10,14,0.9)' : alpha(bgPaper, 0.88),
+        backdropFilter: 'blur(20px)',
+        borderBottom: `1px solid ${divider}`,
+        zIndex: 10, flexShrink: 0,
+      }}>
+        <Stack direction="row" alignItems="center" spacing={1.5}>
+          {/* Logo mark */}
+          <Box sx={{
+            width: 28, height: 28, borderRadius: '7px',
+            background: `linear-gradient(135deg, ${primary}, #8B5CF6)`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12,
+            flexShrink: 0,
+          }}>〜</Box>
+          {/* Brand — hide on very small screens */}
+          {!isMobile && (
+            <Typography sx={{ fontFamily: '"Sora", sans-serif', fontWeight: 700, fontSize: '0.9rem', color: textPrimary }}>
+              MeetWave
             </Typography>
-          </Box>
-        </Toolbar>
-      </AppBar>
-
-      <Box sx={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        <VideoGrid
-          participants={pps}
-          layout={screenShareParticipant ? 'presentation' : 'grid'}
-          screenShareParticipantId={screenShareParticipant?.id}
-          streams={streams}
-        />
+          )}
+          {/* <Box sx={{ width: 1, height: 18, background: divider }} /> */}
+          <Typography sx={{
+            fontSize: '0.78rem', color: textSecondary,
+            fontFamily: 'monospace', letterSpacing: '0.05em',
+            // Truncate room ID on small screens
+            maxWidth: { xs: 90, sm: 'none' },
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {roomId}
+          </Typography>
+        </Stack>
+        <MeetingTimer />
       </Box>
 
-      <MeetingControls
-        onLeave={() => leaveMeeting()}
-        onToggleChat={() => setChatOpen(!isChatOpen)}
-        onToggleParticipants={() => {}}
-        unreadMessages={unreadMessages}
-      />
+      {/* ── Content area ─────────────────────────────────────────────────── */}
+      <Box sx={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
+        {/* Video area — shrinks when side panel is open on desktop */}
+        <Box sx={{
+          flex: 1, minWidth: 0, position: 'relative',
+          // On mobile, hide video behind panel if panel is open
+          display: { xs: hasSidePanel ? 'none' : 'block', md: 'block' },
+        }}>
+          <VideoGrid
+            localMicOn={store.isMicOn}
+            localCameraOn={store.isCameraOn}
+            onPinToggle={handlePinToggle}
+            onMuteParticipant={handleMuteParticipant}
+            onKickParticipant={handleKickParticipant}
+            isHostUser={isHost}
+          />
+          <ReactionsOverlay socket={socketRef.current} />
+          {isHost && <WaitingRoomRequests socket={socketRef.current} />}
+        </Box>
 
-      <Snackbar open={!!connectError} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
-        <Alert severity="error" sx={{ width: '100%' }}>
-          {connectError}
-        </Alert>
-      </Snackbar>
+        {/* Side panels — full-width overlay on mobile, sidebar on desktop */}
+        {isChatOpen && (
+          <Box sx={{
+            width: { xs: '100%', md: 320 },
+            flexShrink: 0,
+          }}>
+            <ChatPanel socket={socketRef.current} />
+          </Box>
+        )}
+        {store.isParticipantsOpen && (
+          <Box sx={{
+            width: { xs: '100%', md: 280 },
+            flexShrink: 0,
+          }}>
+            <ParticipantsList socket={socketRef.current} isHost={isHost} />
+          </Box>
+        )}
+      </Box>
+
+      {/* ── Controls bar ─────────────────────────────────────────────────── */}
+      <Box sx={{ flexShrink: 0 }}>
+        <MeetingControls
+          onToggleMic={handleMuteMic}
+          onToggleCamera={handleMuteCamera}
+          onToggleScreen={handleToggleScreen}
+          onLeave={handleLeave}
+          onEndRoom={isHost ? handleEndRoom : undefined}
+          onToggleLock={isHost ? handleToggleLock : undefined}
+          onMuteAll={isHost ? handleMuteAll : undefined}
+          onReaction={handleReaction}
+          onToggleLayout={handleToggleLayout}
+          isHost={isHost}
+          roomMode={store.room?.mode || 'conference'}
+          canProduce={canProduce}
+        />
+      </Box>
     </Box>
   );
-};
+}
 
-export default MeetingRoom;
+// ── Meeting timer (server-synced) ─────────────────────────────────────────────
+function MeetingTimer() {
+  const theme = useTheme();
+  const { room, clockOffset } = useMeetingStore();
+  const [elapsed, setElapsed] = useState('00:00');
+
+  useEffect(() => {
+    if (!room) return;
+    const tick = () => {
+      const serverNow = Date.now() + clockOffset;
+      const secs = Math.floor((serverNow - room.createdAt) / 1000);
+      const m = Math.floor(secs / 60).toString().padStart(2, '0');
+      const s = (secs % 60).toString().padStart(2, '0');
+      setElapsed(
+        secs >= 3600
+          ? `${Math.floor(secs / 3600).toString().padStart(2, '0')}:${m}:${s}`
+          : `${m}:${s}`,
+      );
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [room, clockOffset]);
+
+  return (
+    <Typography sx={{
+      fontSize: '0.82rem',
+      color: theme.palette.text.secondary,
+      fontFamily: 'monospace',
+      letterSpacing: '0.08em',
+    }}>
+      {elapsed}
+    </Typography>
+  );
+}

@@ -1,53 +1,76 @@
-export interface User {
-  id: string;
+export type RoomMode = 'conference' | 'broadcast';
+
+export interface RoomMeta {
+  roomId: string;
+  hostId: string;
+  hostName: string;
   name: string;
-  email?: string;
-  avatar?: string;
+  mode: RoomMode;
+  isLocked: boolean;
+  password: string | null;
+  maxParticipants: number;
+  createdAt: number;
+  serverId: string;
 }
 
-export interface Meeting {
-  id: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  participants: string[];
-  host: string;
-  joinUrl: string;
-  isRecurring: boolean;
-  description?: string;
-}
-
-export interface Participant {
-  id: string;
-  name: string;
-  isVideoOn?: boolean;
-  isAudioOn?: boolean;
-  isScreenSharing?: boolean;
-  avatar?: string
-  isHost?: boolean;
+export interface ParticipantMeta {
+  socketId: string;
+  userId: string;
+  displayName: string;
+  photoURL: string | null;
+  roomId: string;
+  isHost: boolean;
+  role: 'host' | 'broadcaster' | 'viewer' | 'participant';
+  joinedAt: number;
+  lastSeen: number;
 }
 
 export interface ChatMessage {
   id: string;
+  roomId: string;
   senderId: string;
   senderName: string;
-  content: string;
+  senderPhoto: string | null;
+  text: string;
   timestamp: number;
-  isPrivate: boolean;
-  recipientId?: string;
-  senderAvatar?: string;
 }
 
-export interface MediaDevice {
-  deviceId: string;
-  kind: 'audioinput' | 'audiooutput' | 'videoinput';
-  label: string;
+export interface WaitingEntry {
+  socketId: string;
+  userId: string;
+  displayName: string;
+  photoURL: string | null;
+  requestedAt: number;
 }
 
-export interface Notification {
+export interface ProducerInfo {
+  producerId: string;
+  socketId: string;
+  userId: string;
+  displayName: string;
+  kind: 'audio' | 'video';
+  paused: boolean;
+  isScreenShare: boolean;
+}
+
+export interface RemoteStream {
+  socketId: string;
+  userId: string;
+  displayName: string;
+  photoURL: string | null;
+  videoStream: MediaStream | null;
+  audioStream: MediaStream | null;
+  screenStream: MediaStream | null;
+  audioLevel: number;
+  role: ParticipantMeta['role'];
+  isHost: boolean;
+}
+
+export interface Reaction {
   id: string;
-  type: 'info' | 'warning' | 'error' | 'success';
-  message: string;
-  timestamp: string;
-  isRead: boolean;
+  socketId: string;
+  userId: string;
+  displayName: string;
+  emoji: string;
+  timestamp: number;
 }

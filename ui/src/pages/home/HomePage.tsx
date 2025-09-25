@@ -1,340 +1,288 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  Button,
-  Grid,
-  Divider,
-  Paper,
-  Chip,
-  useTheme,
-  Skeleton,
+  Box, Typography, Button, Stack, Avatar, IconButton,
+  Tooltip, alpha, Chip, Menu, MenuItem, ListItemIcon, useTheme,
 } from '@mui/material';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
-import { Video, Calendar, Share2, ChevronRight, CheckCircle, Clock } from 'lucide-react';
-import useAuthStore from '../../store/authStore';
-import { fetchUserMeetings } from '../../lib/firebase';
-import JoinMeetingDialog from '../../components/ui/JoinMeetingDialog';
-import useMeetingStore from '../../store/meetingStore';
+import {
+  VideoCall, Login, Logout, Person,
+  Lock, BroadcastOnHome, Groups, DarkMode, LightMode,
+} from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { signOut, auth } from '../../lib/firebase';
+import { useAuthStore } from '../../store/authStore';
+import { useThemeMode } from '../../main';
+import CreateMeetingDialog from '../../components/dialogs/CreateMeetingDialog';
+import JoinMeetingDialog from '../../components/dialogs/JoinMeetingDialog';
 
-const HomePage = () => {
-  const { user } = useAuthStore();
-  const [joinDialogOpen, setJoinDialogOpen] = useState(false);
-  const [currentStep, setCurrentStep] = useState(0);
-  const [upcomingMeetings, setUpcomingMeetings] = useState<any[]>([]);
-  const [meetingsLoading, setMeetingsLoading] = useState(true);
-  const [joiningMeeting, setJoinMeeting] = useState(false);
-  const theme = useTheme();
-  const navigate = useNavigate()
-  const {join} = useMeetingStore()
+export default function HomePage() {
+  const navigate   = useNavigate();
+  const theme      = useTheme();
+  const { mode, toggleMode } = useThemeMode();
+  const { user }   = useAuthStore();
+  const [createOpen, setCreateOpen] = useState(false);
+  const [joinOpen,   setJoinOpen]   = useState(false);
+  const [anchorEl,   setAnchorEl]   = useState<null | HTMLElement>(null);
 
-  useEffect(() => {
-    fetchUserMeetings()
-      .then(({ upcoming }) => setUpcomingMeetings(upcoming))
-      .catch(console.error)
-      .finally(() => setMeetingsLoading(false));
-  }, []);
+  const isDark = mode === 'dark';
 
-  const upcomingMeeting = upcomingMeetings[0] || null;
+  async function handleSignOut() {
+    await signOut(auth);
+    navigate('/auth');
+  }
 
-  const meetingDate = upcomingMeeting?.scheduledFor
-    ? new Date(upcomingMeeting.scheduledFor)
-    : null;
-  const formattedTime = meetingDate?.toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const displayName = user?.displayName || user?.email?.split('@')[0] || 'User';
+  const initials    = displayName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
 
-  const onboardingSteps = [
+  // ── Semantic aliases for convenience ──────────────────────────────────────
+  const primary   = theme.palette.primary.main;
+  const secondary = theme.palette.secondary.main;
+  const warning   = theme.palette.warning.main;
+  const textPrimary   = theme.palette.text.primary;
+  const textSecondary = theme.palette.text.secondary;
+  const bgDefault = theme.palette.background.default;
+  const bgPaper   = theme.palette.background.paper;
+  const divider   = theme.palette.divider;
+
+  const featureCards = [
     {
-      title: 'Create your first meeting',
-      description: 'Start a new meeting and invite participants',
-      icon: <Video size={24} color={theme.palette.primary.main} />,
-      completed: upcomingMeetings.length > 0,
+      icon: <Groups sx={{ fontSize: 28, color: primary }} />,
+      title: 'Conference mode',
+      desc: 'Everyone can speak and share video. Perfect for team meetings up to 50 people.',
+      accent: primary,
     },
     {
-      title: 'Schedule a meeting',
-      description: 'Plan ahead by scheduling a meeting',
-      icon: <Calendar size={24} color={theme.palette.primary.main} />,
-      completed: false,
+      icon: <BroadcastOnHome sx={{ fontSize: 28, color: secondary }} />,
+      title: 'Broadcast mode',
+      desc: 'One presenter, unlimited viewers. Ideal for webinars, demos, and talks.',
+      accent: secondary,
     },
     {
-      title: 'Share your personal meeting link',
-      description: 'Send your personal meeting link to connect instantly',
-      icon: <Share2 size={24} color={theme.palette.primary.main} />,
-      completed: false,
+      icon: <Lock sx={{ fontSize: 28, color: warning }} />,
+      title: 'Waiting room',
+      desc: 'Lock your room and admit only approved participants with one click.',
+      accent: warning,
     },
   ];
 
-  const handleJoinMeeting = async (meetingId:any, passcode:any) => {
-    // if (joiningMeeting) return
-    try {
-      console.log('idoioew')
-      // setJoinMeeting(true);
-      const meeting = await join(meetingId, passcode, user?.name);
-      console.log('ijiowje')
-      console.log({meeting})
-      if (meeting) {
-        if (meeting.currentParticipant) {
-          // setUser(meeting.currentParticipant);
-        }
-        navigate(`/meeting/${meetingId}`);
-        // handleClose();
-      }
-    } catch (err: any) {
-      // setError(err.message || 'Failed to join meeting. Please check your details.');
-    } finally {
-      setJoinMeeting(false);
-    }
-  };
-
-  useEffect(() => {
-    const interval = setInterval(
-      () => setCurrentStep((prev) => (prev + 1) % onboardingSteps.length),
-      5000
-    );
-    return () => clearInterval(interval);
-  }, []);
-
-  const formatMeetingTime = (m: any) => {
-    const d = m.scheduledFor?.toDate ? m.scheduledFor.toDate() : new Date(m.scheduledFor);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const formatMeetingDate = (m: any) => {
-    const d = m.scheduledFor?.toDate ? m.scheduledFor.toDate() : new Date(m.scheduledFor);
-    const today = new Date();
-    if (d.toDateString() === today.toDateString()) return 'Today';
-    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-  };
-
   return (
-    <Box>
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Welcome back, {user?.name?.split(' ')[0]}
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Your meetings and updates at a glance
-        </Typography>
-      </Box>
+    <Box sx={{
+      minHeight: '100vh',
+      background: bgDefault,
+      // The subtle radial gradients are handled by MuiCssBaseline in the theme,
+      // but we can reinforce them here so they sit on top of bgDefault:
+      backgroundImage: isDark
+        ? `
+            radial-gradient(ellipse 80% 60% at 15% -5%, ${alpha(primary, 0.15)} 0%, transparent 55%),
+            radial-gradient(ellipse 50% 40% at 85% 105%, ${alpha(secondary, 0.08)} 0%, transparent 55%)
+          `
+        : `
+            radial-gradient(ellipse 70% 50% at 10% -10%, ${alpha(primary, 0.07)} 0%, transparent 55%),
+            radial-gradient(ellipse 50% 40% at 90% 110%, ${alpha(secondary, 0.05)} 0%, transparent 55%)
+          `,
+    }}>
 
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={4}>
-          <Button
-            component={RouterLink}
-            to="/start-meeting"
-            variant="contained"
-            color="primary"
-            fullWidth
-            startIcon={<Video size={20} />}
-            sx={{ p: 1.5, fontWeight: 500 }}
-          >
-            Start New Meeting
-          </Button>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Button
-            variant="outlined"
-            fullWidth
-            onClick={() => setJoinDialogOpen(true)}
-            sx={{ p: 1.5, fontWeight: 500 }}
-          >
-            Join with Code
-          </Button>
-        </Grid>
-        <Grid item xs={12} sm={6} md={4}>
-          <Button
-            component={RouterLink}
-            to="/meetings"
-            variant="outlined"
-            fullWidth
-            startIcon={<Calendar size={20} />}
-            sx={{ p: 1.5, fontWeight: 500 }}
-          >
-            Schedule a Meeting
-          </Button>
-        </Grid>
-      </Grid>
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <Box sx={{
+        position: 'sticky', top: 0, zIndex: 100,
+        borderBottom: `1px solid ${divider}`,
+        background: isDark
+          ? 'rgba(8,10,14,0.85)'
+          : 'rgba(248,249,252,0.88)',
+        backdropFilter: 'blur(20px)',
+      }}>
+        <Box sx={{
+          maxWidth: 1100, mx: 'auto', px: 3, py: 1.5,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          {/* Logo */}
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Box sx={{
+              width: 32, height: 32, borderRadius: '8px',
+              background: `linear-gradient(135deg, ${primary} 0%, #8B5CF6 100%)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 14, boxShadow: `0 4px 12px ${alpha(primary, 0.35)}`,
+            }}>〜</Box>
+            <Typography sx={{
+              fontFamily: '"Sora", sans-serif', fontWeight: 700,
+              fontSize: '1.1rem', color: textPrimary,
+            }}>
+              MeetWave
+            </Typography>
+          </Stack>
 
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={6}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-                <Typography variant="h6" component="h2">
-                  Next Meeting
-                </Typography>
-                <Chip label="Upcoming" size="small" color="primary" sx={{ fontWeight: 500 }} />
-              </Box>
-
-              {meetingsLoading ? (
-                <>
-                  <Skeleton variant="text" height={32} />
-                  <Skeleton variant="text" width="60%" />
-                </>
-              ) : upcomingMeeting ? (
-                <Box>
-                  <Typography variant="h5" component="div" sx={{ mb: 1 }}>
-                    {upcomingMeeting.title}
-                  </Typography>
-                  {meetingDate && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1, color: 'text.secondary' }}>
-                      <Clock size={18} />
-                      <Typography variant="body2" sx={{ ml: 1 }}>
-                        {formatMeetingDate(upcomingMeeting)} · {formatMeetingTime(upcomingMeeting)}
-                      </Typography>
-                    </Box>
-                  )}
-                  {upcomingMeeting.description && (
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                      {upcomingMeeting.description}
-                    </Typography>
-                  )}
-                  <Button
-                    // component={RouterLink}
-                    disabled={joiningMeeting}
-                    onClick={() => handleJoinMeeting(upcomingMeeting.id, upcomingMeeting.passcode)}
-                    // to={`/meeting/${upcomingMeeting.id}`}
-                    variant="contained"
-                    size="small"
-                    sx={{ mt: 1 }}
-                  >
-                    Join Meeting
-                  </Button>
-                </Box>
-              ) : (
-                <Typography variant="body1" color="text.secondary">
-                  No upcoming meetings scheduled.
-                </Typography>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} md={6}>
-          <Card sx={{ height: '100%' }}>
-            <CardContent>
-              <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
-                At a Glance
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 2,
-                      textAlign: 'center',
-                      bgcolor: 'primary.light',
-                      color: 'primary.contrastText',
-                      borderRadius: 2,
-                    }}
-                  >
-                    <Typography variant="h4" component="div">
-                      {meetingsLoading ? <Skeleton /> : upcomingMeetings.length}
-                    </Typography>
-                    <Typography variant="body2">Upcoming Meetings</Typography>
-                  </Paper>
-                </Grid>
-                <Grid item xs={6}>
-                  <Paper
-                    elevation={0}
-                    sx={{
-                      p: 2,
-                      textAlign: 'center',
-                      bgcolor: 'secondary.light',
-                      color: 'secondary.contrastText',
-                      borderRadius: 2,
-                    }}
-                  >
-                    <Typography variant="h4" component="div">
-                      {meetingsLoading ? (
-                        <Skeleton />
-                      ) : (
-                        upcomingMeetings.filter((m) => {
-                          const d = m.scheduledFor?.toDate ? m.scheduledFor.toDate() : null;
-                          return d && d.toDateString() === new Date().toDateString();
-                        }).length
-                      )}
-                    </Typography>
-                    <Typography variant="body2">Meetings Today</Typography>
-                  </Paper>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Onboarding guide */}
-      <Card sx={{ mb: 4, overflow: 'hidden' }}>
-        <CardContent>
-          <Typography variant="h6" component="h2" sx={{ mb: 2 }}>
-            Getting Started
-          </Typography>
-          <Box sx={{ position: 'relative', minHeight: 130 }}>
-            {onboardingSteps.map((step, index) => (
-              <Box
-                key={index}
+          {/* Right actions */}
+          <Stack direction="row" alignItems="center" spacing={1}>
+            {/* Theme toggle */}
+            <Tooltip title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}>
+              <IconButton
+                onClick={toggleMode}
+                size="small"
                 sx={{
-                  position: 'absolute',
-                  width: '100%',
-                  transition: 'all 0.5s ease',
-                  opacity: currentStep === index ? 1 : 0,
-                  transform: currentStep === index ? 'translateX(0)' : 'translateX(100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  visibility: currentStep === index ? 'visible' : 'hidden',
+                  color: textSecondary,
+                  border: `1px solid ${divider}`,
+                  borderRadius: '8px',
+                  p: 0.75,
+                  '&:hover': { color: textPrimary, borderColor: alpha(primary, 0.4) },
                 }}
               >
-                <Box sx={{ mr: 2 }}>{step.icon}</Box>
-                <Box sx={{ flexGrow: 1 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                      {step.title}
-                    </Typography>
-                    {step.completed && (
-                      <CheckCircle
-                        size={16}
-                        color={theme.palette.success.main}
-                        style={{ marginLeft: '8px' }}
-                      />
-                    )}
-                  </Box>
-                  <Typography variant="body2" color="text.secondary">
-                    {step.description}
-                  </Typography>
-                </Box>
-                <Button variant="text" endIcon={<ChevronRight size={18} />} size="small">
-                  {step.completed ? 'Completed' : 'Get Started'}
-                </Button>
-              </Box>
-            ))}
-          </Box>
-          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-            {onboardingSteps.map((_, index) => (
-              <Box
-                key={index}
-                sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  bgcolor: currentStep === index ? 'primary.main' : 'grey.300',
-                  mx: 0.5,
-                  cursor: 'pointer',
-                }}
-                onClick={() => setCurrentStep(index)}
-              />
-            ))}
-          </Box>
-        </CardContent>
-      </Card>
+                {isDark ? <LightMode fontSize="small" /> : <DarkMode fontSize="small" />}
+              </IconButton>
+            </Tooltip>
 
-      <JoinMeetingDialog joinDialogOpen={joinDialogOpen} setJoinDialogOpen={setJoinDialogOpen} />
+            {/* Avatar */}
+            <Tooltip title={displayName}>
+              <Avatar
+                src={user?.photoURL || undefined}
+                onClick={(e) => setAnchorEl(e.currentTarget)}
+                sx={{
+                  width: 36, height: 36, cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  border: `2px solid ${alpha(primary, 0.4)}`,
+                }}
+              >
+                {initials}
+              </Avatar>
+            </Tooltip>
+          </Stack>
+        </Box>
+      </Box>
+
+      {/* ── User menu ───────────────────────────────────────────────────────── */}
+      <Menu
+        anchorEl={anchorEl}
+        open={Boolean(anchorEl)}
+        onClose={() => setAnchorEl(null)}
+        PaperProps={{ sx: { mt: 1, minWidth: 180 } }}
+      >
+        <MenuItem disabled sx={{ opacity: 1 }}>
+          <ListItemIcon><Person fontSize="small" /></ListItemIcon>
+          <Typography variant="body2" noWrap sx={{ maxWidth: 140 }}>{displayName}</Typography>
+        </MenuItem>
+        <MenuItem onClick={handleSignOut} sx={{ color: theme.palette.error.main }}>
+          <ListItemIcon>
+            <Logout fontSize="small" sx={{ color: theme.palette.error.main }} />
+          </ListItemIcon>
+          Sign out
+        </MenuItem>
+      </Menu>
+
+      {/* ── Hero ────────────────────────────────────────────────────────────── */}
+      <Box sx={{ maxWidth: 1100, mx: 'auto', px: 3, pt: 10, pb: 6 }}>
+        <Box sx={{ maxWidth: 680, mx: 'auto', textAlign: 'center', mb: 8 }}>
+
+          {/* Badge */}
+          <Chip
+            label="WebRTC · End-to-end encrypted"
+            size="small"
+            sx={{
+              mb: 3,
+              background: alpha(primary, isDark ? 0.12 : 0.08),
+              border: `1px solid ${alpha(primary, isDark ? 0.3 : 0.25)}`,
+              color: isDark ? theme.palette.primary.light : theme.palette.primary.dark,
+              fontWeight: 600, fontSize: '0.75rem',
+            }}
+          />
+
+          {/* Headline */}
+          <Typography variant="h2" sx={{
+            fontFamily: '"Sora", sans-serif',
+            fontWeight: 800,
+            fontSize: { xs: '2rem', sm: '2.8rem', md: '3.4rem' },
+            letterSpacing: '-0.04em',
+            lineHeight: 1.1,
+            mb: 2.5,
+            // Gradient text — adapts to mode
+            background: isDark
+              ? 'linear-gradient(135deg, #F1F5F9 30%, #818CF8 100%)'
+              : `linear-gradient(135deg, #0F172A 30%, ${primary} 100%)`,
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+          }}>
+            Meet without friction
+          </Typography>
+
+          <Typography variant="h6" sx={{
+            color: textSecondary,
+            fontWeight: 400, lineHeight: 1.6,
+            mb: 5, fontSize: '1.05rem',
+          }}>
+            HD video, real-time collaboration, and broadcast mode — all in one place.
+          </Typography>
+
+          {/* CTA buttons */}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="center">
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<VideoCall />}
+              onClick={() => setCreateOpen(true)}
+              sx={{ px: 4, py: 1.6, fontSize: '1rem' }}
+            >
+              New meeting
+            </Button>
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<Login />}
+              onClick={() => setJoinOpen(true)}
+              sx={{ px: 4, py: 1.6, fontSize: '1rem' }}
+            >
+              Join meeting
+            </Button>
+          </Stack>
+        </Box>
+
+        {/* ── Feature cards ─────────────────────────────────────────────────── */}
+        <Box sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: '1fr 1fr 1fr' },
+          gap: 2,
+        }}>
+          {featureCards.map((card) => (
+            <Box
+              key={card.title}
+              sx={{
+                p: 3,
+                borderRadius: '16px',
+                background: isDark
+                  ? 'rgba(15,17,23,0.7)'
+                  : bgPaper,
+                backdropFilter: isDark ? 'blur(20px)' : undefined,
+                border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : alpha(card.accent, 0.12)}`,
+                boxShadow: isDark
+                  ? 'none'
+                  : `0 2px 16px ${alpha(card.accent, 0.06)}`,
+                transition: 'all 0.25s',
+                '&:hover': {
+                  border: `1px solid ${alpha(card.accent, 0.35)}`,
+                  transform: 'translateY(-3px)',
+                  boxShadow: `0 12px 40px ${alpha(card.accent, isDark ? 0.12 : 0.1)}`,
+                },
+              }}
+            >
+              {/* Icon box */}
+              <Box sx={{
+                width: 52, height: 52, borderRadius: '12px', mb: 2,
+                background: alpha(card.accent, isDark ? 0.12 : 0.08),
+                border: `1px solid ${alpha(card.accent, isDark ? 0.2 : 0.15)}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {card.icon}
+              </Box>
+
+              <Typography variant="h6" sx={{ fontWeight: 600, mb: 1, fontSize: '0.95rem', color: textPrimary }}>
+                {card.title}
+              </Typography>
+              <Typography variant="body2" sx={{ color: textSecondary, lineHeight: 1.6 }}>
+                {card.desc}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
+      </Box>
+
+      <CreateMeetingDialog open={createOpen} onClose={() => setCreateOpen(false)} />
+      <JoinMeetingDialog   open={joinOpen}   onClose={() => setJoinOpen(false)} />
     </Box>
   );
-};
-
-export default HomePage;
+}
